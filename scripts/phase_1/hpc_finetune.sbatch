@@ -35,7 +35,7 @@ LEARNING_RATE=5e-4        # A smaller LR is safer for fine-tuning than the 5e-4 
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
-EPOCHS=5                 # Start with 10 epochs and increase if needed (README uses 50)
+EPOCHS=70                 # Start with 10 epochs and increase if needed (README uses 50)
 MIN_LR=1e-6 # Default: 1e-6
 LAYER_DECAY=0.75          #
 DROP_PATH=0.2             #
@@ -49,7 +49,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model
 
-EARLY_STOPPING_PATIENCE=10  # Number of epochs with no improvement after which training will be stopped
+EARLY_STOPPING_PATIENCE=10  # Number of epochs with no improvement after which training will be stopped. To disable early stopping, set to 0.
 EARLY_STOPPING_DELTA=0.001   # Minimum change in the monitored metric to qualify as an improvement
 
 # --- Change to the project root directory ---
