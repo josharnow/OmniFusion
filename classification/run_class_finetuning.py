@@ -269,6 +269,7 @@ def get_args():
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
     parser.add_argument('--enable_linear_eval', action='store_true', default=False)
     parser.add_argument('--enable_multi_print', action='store_true',default=False, help='allow each gpu prints something')
+    parser.add_argument('--disable_amp', action='store_true', default=False, help='Disable automatic mixed precision training (train in float32).')
 
     parser.add_argument('--exp_name', default='', type=str,
                         help='name of exp. it is helpful when save the checkpoint')
