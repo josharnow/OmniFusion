@@ -100,7 +100,6 @@ def train_full_precision(
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None
 ):
-    print("Training in Full Precision (FP32) mode.")
     # *** --- START: Full Precision (FP32) Training Logic --- ***
     # The autocast and loss_scaler logic has been removed.
     
@@ -144,7 +143,6 @@ def train_amp(
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None
 ):
-    print("Training with Automatic Mixed Precision (AMP).")
     if loss_scaler is None:
         samples = samples.half()
         loss, output = train_class_batch(
@@ -201,6 +199,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     print_freq = 10
 
     optimizer.zero_grad()
+
+    if args and args.disable_amp:
+        print("Training in Full Precision (FP32) mode.")
+    else:
+        print("Automatic Mixed Precision (AMP) is enabled.")
 
     for data_iter_step, (samples, _, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
