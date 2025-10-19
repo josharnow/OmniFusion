@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-10%2  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 2 concurrent jobs
+#SBATCH --array=1-10%1  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 2 concurrent jobs
 
 
 
@@ -34,7 +34,7 @@ BATCH_SIZE=48             # Smaller batch size for fine-tuning
 LEARNING_RATE=5e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-WARMUP_EPOCHS=0           #
+WARMUP_EPOCHS=5           #
 EPOCHS=5                 # Start with 10 epochs and increase if needed (README uses 50)
 MIN_LR=1e-6 # Default: 1e-6
 LAYER_DECAY=0.75          #
