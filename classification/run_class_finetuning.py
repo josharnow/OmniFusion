@@ -1,6 +1,7 @@
 # Add these imports at the top of the file
 import os
 from dotenv import load_dotenv
+import matplotlib.pyplot as plt # Added for plotting
 
 # --- ADD THIS DEBUGGING BLOCK AT THE VERY TOP ---
 import torch
@@ -24,7 +25,7 @@ import argparse
 import datetime
 import numpy as np
 import time
-# import torch
+# import torch # Already imported above
 import torch.backends.cudnn as cudnn
 import json
 import os
@@ -36,7 +37,7 @@ from pathlib import Path
 from models.modeling_finetune import *
 
 from timm.data.mixup import Mixup
-from timm.models import create_model
+# from timm.models import create_model # Not used directly, model created based on name
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import ModelEma
 from furnace.optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
@@ -47,6 +48,43 @@ import torch.nn.functional as F
 from torch import nn
 import furnace.utils as utils
 from scipy import interpolate
+
+# --- NEW, CORRECTED LOSS CLASS ---
+class WeightedLabelSmoothingCrossEntropy(nn.Module):
+    """
+    NLL loss with label smoothing and class weights.
+    """
+    def __init__(self, smoothing=0.1, class_weights=None):
+        super(WeightedLabelSmoothingCrossEntropy, self).__init__()
+        assert smoothing < 1.0
+        self.smoothing = smoothing
+        self.confidence = 1. - smoothing
+        self.class_weights = class_weights
+
+    def forward(self, x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        logprobs = F.log_softmax(x, dim=-1)
+
+        # Handle soft targets (from mixup)
+        if target.ndim == 2:
+            # Soft targets are already a distribution, just apply cross-entropy
+            loss = - (target * logprobs).sum(dim=-1)
+            # Find the original class index to apply weights
+            target_indices = target.argmax(dim=-1)
+        # Handle hard targets
+        else:
+            nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+            nll_loss = nll_loss.squeeze(1)
+            smooth_loss = -logprobs.mean(dim=-1)
+            loss = self.confidence * nll_loss + self.smoothing * smooth_loss
+            target_indices = target
+
+        # Apply class weights
+        if self.class_weights is not None:
+            weights = self.class_weights[target_indices]
+            loss = loss * weights
+
+        return loss.mean()
+
 
 def get_args():
     parser = argparse.ArgumentParser('fine-tuning and evaluation script for image classification', add_help=False)
@@ -231,10 +269,17 @@ def get_args():
     parser.add_argument('--enable_deepspeed', action='store_true', default=False)
     parser.add_argument('--enable_linear_eval', action='store_true', default=False)
     parser.add_argument('--enable_multi_print', action='store_true',default=False, help='allow each gpu prints something')
-    parser.add_argument('--disable_amp', action='store_true', default=False, help='Disable automatic mixed precision training (train in float32).')
 
     parser.add_argument('--exp_name', default='', type=str,
                         help='name of exp. it is helpful when save the checkpoint')
+
+    # --- ADD EARLY STOPPING ARGUMENTS ---
+    parser.add_argument('--early_stopping_patience', type=int, default=10,
+                        help='Number of epochs to wait for improvement before stopping (0 to disable).')
+    parser.add_argument('--early_stopping_delta', type=float, default=0.001,
+                        help='Minimum change in the monitored metric to qualify as an improvement.')
+    # --- END EARLY STOPPING ARGUMENTS ---
+
 
     known_args, _ = parser.parse_known_args()
 
@@ -243,21 +288,87 @@ def get_args():
             import deepspeed
             parser = deepspeed.add_config_arguments(parser)
             ds_init = deepspeed.initialize
-        except:
-            print("Please 'pip install deepspeed==0.4.0'")
+        except ImportError:
+            print("Please 'pip install deepspeed'")
             exit(0)
     else:
         ds_init = None
 
     return parser.parse_args(), ds_init
 
+# --- NEW PLOTTING FUNCTION ---
+def plot_training_curves(history, output_dir, epochs_completed):
+    """
+    Plots and saves training and validation metrics.
+
+    Args:
+        history (dict): A dictionary containing lists of metrics per epoch.
+                        Expected keys: 'train_loss', 'val_loss', 'val_acc',
+                                       'val_bacc', 'val_auc'.
+        output_dir (str): The directory to save the plot images.
+        epochs_completed (int): The number of epochs actually completed.
+    """
+    epochs_range = range(epochs_completed) # Use actual completed epochs
+
+    plt.figure(figsize=(18, 5))
+
+    # Plot Loss
+    plt.subplot(1, 3, 1)
+    if history['train_loss']: # Check if list is not empty
+        plt.plot(epochs_range, history['train_loss'], label='Training Loss')
+    if history['val_loss']:
+        plt.plot(epochs_range, history['val_loss'], label='Validation Loss')
+    plt.legend(loc='upper right')
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+
+    # Plot Accuracy (Overall and Balanced)
+    plt.subplot(1, 3, 2)
+    if history['val_acc']:
+        plt.plot(epochs_range, history['val_acc'], label='Validation Accuracy')
+    if history['val_bacc']:
+        plt.plot(epochs_range, history['val_bacc'], label='Validation Balanced Accuracy')
+    plt.legend(loc='lower right')
+    plt.title('Validation Accuracy Metrics')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.ylim([0, 1]) # Accuracy typically between 0 and 1
+    plt.grid(True)
+
+    # Plot AUC
+    plt.subplot(1, 3, 3)
+    if history['val_auc']:
+        plt.plot(epochs_range, history['val_auc'], label='Validation AUC-ROC')
+    plt.legend(loc='lower right')
+    plt.title('Validation AUC-ROC')
+    plt.xlabel('Epoch')
+    plt.ylabel('AUC')
+    plt.ylim([0.5, 1]) # AUC typically between 0.5 and 1
+    plt.grid(True)
+
+    plt.tight_layout() # Adjust layout
+
+    # Save the combined plot
+    plot_path = os.path.join(output_dir, "training_validation_curves.png")
+    try:
+        plt.savefig(plot_path)
+        print(f"Training curves saved to {plot_path}")
+    except Exception as e:
+        print(f"Error saving training curves plot: {e}")
+    plt.close() # Close the figure to free memory
 
 def main(args, ds_init):
 
     if not args.enable_linear_eval:
         args.aa = 'rand-m9-mstd0.5-inc1'
 
-    print(args)
+    print("--- Arguments ---")
+    for arg, value in sorted(vars(args).items()):
+         print(f"{arg}: {value}")
+    print("-----------------")
+
 
     print("Before entering init_distributed_mode function")
     utils.init_distributed_mode(args)
@@ -274,6 +385,7 @@ def main(args, ds_init):
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
+    # import random # Already imported if needed elsewhere
     # random.seed(seed)
 
     cudnn.benchmark = True
@@ -283,27 +395,39 @@ def main(args, ds_init):
     std = [0.228, 0.224, 0.225]
 
     normalize = transforms.Normalize(mean=mean, std=std)
+    # --- Define Transforms ---
+    # Simplified train_trans based on previous discussions (adjust if needed)
     train_trans = [
-        transforms.Resize(256),
-        transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)),
+        transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3), # 3 is bicubic
         transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(45),
-        transforms.ColorJitter(hue=0.2),
         transforms.ToTensor(),
-        normalize]
+        normalize
+    ]
+    if args.aa: # Add RandAugment if specified
+        print(f"Using RandAugment: {args.aa}")
+        train_trans.insert(1, transforms.RandAugment(num_ops=9, magnitude=9)) # Example RandAugment
 
-    val_trans = [transforms.Resize(256),
-                 transforms.CenterCrop(args.input_size),
-                 transforms.ToTensor(),
-                 normalize]
+    val_trans = [
+        transforms.Resize(args.input_size + 32, interpolation=3), # Resize slightly larger
+        transforms.CenterCrop(args.input_size),
+        transforms.ToTensor(),
+        normalize
+    ]
+    test_trans = transforms.Compose(val_trans) # Use validation transform for non-TTA test
+    if args.TTA:
+        # Define TTA transforms if needed (e.g., FiveCrop + flips)
+        # For simplicity, using ToTensor() for now as in the original code snippet provided
+        test_trans = transforms.Compose([transforms.ToTensor(), normalize])
+        print("Using TTA transforms (currently basic ToTensor+Normalize, adjust if needed)")
+
 
     data_transforms = {
         'train': transforms.Compose(train_trans),
         'val': transforms.Compose(val_trans),
-        # 'test': transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # uncomment it when you are testing on F17K or Daffodil
-        'test': transforms.Compose([transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
+        'test': test_trans
     }
+    # --- End Define Transforms ---
+
 
     if args.nb_classes == 2:
         binary = True
@@ -311,66 +435,119 @@ def main(args, ds_init):
         binary = False
 
     df = pd.read_csv(args.csv_path)
-    df = df.sample(frac=1, random_state=42)
-    dataset_train = Uni_Dataset(df=df,
-                                root=args.root_path,
-                                train=True,
-                                transforms=data_transforms['train'],
-                                binary=binary,
-                                data_percent=args.percent_data,
-                                image_key=args.image_key)
-    dataset_val = Uni_Dataset(df=df,
-                              root=args.root_path,
-                              val=True,
-                              transforms=data_transforms['val'],
-                              binary=binary,
-                              image_key=args.image_key)
+    df = df.sample(frac=1, random_state=42).reset_index(drop=True) # Reset index after shuffle
 
-    # dataset_test = dataset_val 
-    dataset_test = Uni_Dataset(df=df,
-                root=args.root_path,
-                test=True,
-                transforms=data_transforms['test'],
-                binary=binary,
-                image_key=args.image_key)
+    # --- Create Datasets ---
+    try:
+        dataset_train = Uni_Dataset(df=df,
+                                    root=args.root_path,
+                                    train=True,
+                                    transforms=data_transforms['train'],
+                                    binary=binary,
+                                    data_percent=args.percent_data,
+                                    image_key=args.image_key)
+        dataset_val = Uni_Dataset(df=df,
+                                  root=args.root_path,
+                                  val=True,
+                                  transforms=data_transforms['val'],
+                                  binary=binary,
+                                  image_key=args.image_key)
+        dataset_test = Uni_Dataset(df=df,
+                    root=args.root_path,
+                    test=True,
+                    transforms=data_transforms['test'],
+                    binary=binary,
+                    image_key=args.image_key)
+        print("Datasets created successfully.")
+    except Exception as e:
+        print(f"Error creating datasets: {e}")
+        print(f"CSV Path: {args.csv_path}, Root Path: {args.root_path}")
+        # Potentially print df.head() or check file existence
+        exit(1)
+    # --- End Create Datasets ---
 
     global_rank = utils.get_rank()
-    if args.weights:
-        label_counts = dataset_train.count_label("binary_label" if binary else "label")
-        total_samples = sum(label_counts)
-        weights = [total_samples / (len(label_counts) * count) for count in label_counts]
-        weight_dict = dict(zip(label_counts.index, weights))
+    num_tasks = utils.get_world_size() # Get num_tasks here
 
-        print('Label distribution:')
-        for label, count in label_counts.items():
-            print(f'Label {label}: {count}')
+    # --- Define Samplers ---
+    sampler_train = None # Initialize
+    if args.distributed:
+        if args.weights:
+            try:
+                # Calculate weights for sampler (only needs to be done once)
+                label_column = "binary_label" if binary else "label"
+                label_counts = dataset_train.count_label(label_column)
+                total_samples = sum(label_counts)
+                class_weights_sampler = [total_samples / (len(label_counts) * count) if count > 0 else 0 for count in label_counts] # Avoid division by zero
+                weight_dict_sampler = dict(zip(label_counts.index, class_weights_sampler))
 
-        train_y = df[(df['split'] == 'train')]["binary_label" if binary else "label"].values.tolist()
-        sample_weights = torch.tensor([weight_dict[label] for label in train_y])
-        sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
-        print("Using WeightedRandomSampler")
-    else:
-        num_tasks = utils.get_world_size()
+                print('Label distribution for Sampler:')
+                for label, count in label_counts.items():
+                    print(f'Label {label}: {count}, Weight: {weight_dict_sampler.get(label, 0):.4f}')
 
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
-        print("Sampler_train =", str(sampler_train))
+                # Get weights for each sample in the training portion of the *original* dataframe
+                train_df = df[df['split'] == 'train'].iloc[:len(dataset_train)] # Ensure correct length if percent_data < 1
+                train_y = train_df[label_column].values.tolist()
+                sample_weights = torch.tensor([weight_dict_sampler.get(label, 0) for label in train_y]) # Use .get with default
+
+                if len(sample_weights) != len(dataset_train):
+                     print(f"Warning: Length mismatch! sample_weights ({len(sample_weights)}) vs dataset_train ({len(dataset_train)}). This might happen with data_percent < 1.0.")
+                     # Adjust if necessary, though WeightedRandomSampler might handle it if num_samples is correct
+
+                # Create sampler, ensure num_samples matches dataset size
+                sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
+                print("Using WeightedRandomSampler for distributed training.")
+                # NOTE: WeightedRandomSampler does NOT need DistributedSampler wrapper
+            except Exception as e:
+                print(f"Error setting up WeightedRandomSampler: {e}")
+                print("Falling back to DistributedSampler.")
+                sampler_train = torch.utils.data.DistributedSampler(
+                    dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+                )
+        else:
+            # Standard distributed sampler
+            sampler_train = torch.utils.data.DistributedSampler(
+                dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+            print("Using standard DistributedSampler.")
+
+        # Validation and Test Samplers for Distributed Eval
+        if args.dist_eval:
+            if len(dataset_val) % num_tasks != 0:
+                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number.')
+            sampler_val = torch.utils.data.DistributedSampler(
+                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+            sampler_test = torch.utils.data.DistributedSampler(
+                dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False) # Typically False for consistent testing
+        else:
+            # If not distributed eval, use sequential on rank 0, None on others
+            sampler_val = torch.utils.data.SequentialSampler(dataset_val) if global_rank == 0 else None
+            sampler_test = torch.utils.data.SequentialSampler(dataset_test) if global_rank == 0 else None
+
+    else: # Not distributed training
+        if args.weights:
+             # Calculate weights and create sampler (similar to distributed case but no DDP involved)
+            label_column = "binary_label" if binary else "label"
+            label_counts = dataset_train.count_label(label_column)
+            total_samples = sum(label_counts)
+            class_weights_sampler = [total_samples / (len(label_counts) * count) if count > 0 else 0 for count in label_counts]
+            weight_dict_sampler = dict(zip(label_counts.index, class_weights_sampler))
+            train_df = df[df['split'] == 'train'].iloc[:len(dataset_train)]
+            train_y = train_df[label_column].values.tolist()
+            sample_weights = torch.tensor([weight_dict_sampler.get(label, 0) for label in train_y])
+            sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
+            print("Using WeightedRandomSampler for single GPU training.")
+        else:
+            # Standard random sampler for single GPU
+            sampler_train = torch.utils.data.RandomSampler(dataset_train)
+            print("Using standard RandomSampler.")
+
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+    # --- End Define Samplers ---
 
     print('train size:', len(dataset_train), ',val size:', len(dataset_val), ',test size:', len(dataset_test))
 
-    if args.dist_eval:
-        if len(dataset_val) % num_tasks != 0:
-            print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                  'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                  'equal num of samples per-process.')
-        sampler_val = torch.utils.data.DistributedSampler(
-            dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
-        sampler_test = torch.utils.data.DistributedSampler(
-            dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)
-    else:
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-        sampler_test = torch.utils.data.SequentialSampler(dataset_test)
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
@@ -378,6 +555,9 @@ def main(args, ds_init):
     else:
         log_writer = None
 
+    # --- Create DataLoaders ---
+    # Need to handle shuffle=False when using WeightedRandomSampler
+    shuffle_train = (sampler_train is None) or isinstance(sampler_train, torch.utils.data.DistributedSampler)
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -385,25 +565,32 @@ def main(args, ds_init):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        shuffle=shuffle_train # Only shuffle if sampler allows (i.e., not WeightedRandomSampler)
     )
 
-    if dataset_val is not None:
+    # Only create val/test loaders if the dataset/sampler exists (relevant for non-rank 0 in non-dist-eval)
+    data_loader_val = None
+    if dataset_val is not None and sampler_val is not None:
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val, sampler=sampler_val,
-            batch_size=int(1.5 * args.batch_size),
+            batch_size=int(1.5 * args.batch_size), # Use larger batch for eval
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=False
         )
-    else:
-        data_loader_val = None
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, sampler=sampler_test,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False
-    )
+
+    data_loader_test = None
+    if dataset_test is not None and sampler_test is not None:
+        data_loader_test = torch.utils.data.DataLoader(
+            dataset_test, sampler=sampler_test,
+            batch_size=args.batch_size, # Use train batch size or specific eval batch size
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=False
+        )
+    # --- End Create DataLoaders ---
+
+
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -412,6 +599,9 @@ def main(args, ds_init):
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
+
+    # --- Create Model ---
+    print(f"Creating model: {args.model}")
     if args.model=="PanDerm_Large_FT":
         model = panderm_large_patch16_224_finetune(
             pretrained=False,
@@ -425,10 +615,7 @@ def main(args, ds_init):
             use_rel_pos_bias=args.rel_pos_bias,
             init_values=args.layer_scale_init_value,
             lin_probe=args.enable_linear_eval)
-        print(model)
         patch_size = model.patch_embed.patch_size
-
-
     elif args.model=='PanDerm_Base_FT':
         model = panderm_base_patch16_224_finetune(
             pretrained=False,
@@ -442,163 +629,230 @@ def main(args, ds_init):
             use_rel_pos_bias=args.rel_pos_bias,
             init_values=args.layer_scale_init_value,
             lin_probe=args.enable_linear_eval)
-        print(model)
         patch_size = model.patch_embed.patch_size
     else:
-        raise ValueError(f"Invalid model name '{args.model}', not supported.")
+        # Fallback or error for unknown models
+        raise ValueError(f"Model {args.model} not recognized.")
+    # print(model) # Optional: print full model structure
+    print(f"Model {args.model} created.")
     print("Patch size = %s" % str(patch_size))
     args.window_size = (args.input_size // patch_size[0], args.input_size // patch_size[1])
     args.patch_size = patch_size
+    # --- End Create Model ---
 
 
-    # if args.pretrained_checkpoint:
-    #     if args.pretrained_checkpoint.startswith('https'):
-    #         checkpoint = torch.hub.load_state_dict_from_url(
-    #             args.pretrained_checkpoint, map_location='cpu', check_hash=True)
-    #     else:
-    #         checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu')
-    #
-    #         if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
-    #             state_dict = checkpoint['state_dict']
-    #             state_dict = {k:v for k,v in state_dict.items() if 'visual' in k}
-    #             checkpoint = {}
-    #             checkpoint['model'] = {k.replace('module.visual.', 'encoder.'): v for k,v in state_dict.items()}
-    #
-    #     print("Load ckpt from %s" % args.pretrained_checkpoint)
+    # --- Load Pretrained Checkpoint ---
     if args.pretrained_checkpoint:
+        print(f"Attempting to load pretrained checkpoint: {args.pretrained_checkpoint}")
         if args.pretrained_checkpoint.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.pretrained_checkpoint, map_location='cpu', check_hash=True)
+            checkpoint_model_key = 'model' # Assume default key for URL checkpoints
         else:
-            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=True)
-            checkpoint = {'model': checkpoint_model}
-            if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
-                state_dict = checkpoint['state_dict']
-                state_dict = {k: v for k, v in state_dict.items() if 'visual' in k}
-                checkpoint = {}
-                checkpoint['model'] = {k.replace('module.visual.', 'encoder.'): v for k, v in state_dict.items()}
-        print('===========================')
-        print("CHECKPOINT MODEL:")
-        print(checkpoint_model.keys())
-        print(checkpoint_model)
-        print('===========================')
-        print("Load ckpt from %s" % args.pretrained_checkpoint)
-        checkpoint_model = None
-        for model_key in args.model_key.split('|'):
-            if model_key in checkpoint:
-                checkpoint_model = checkpoint[model_key]
-                print("Load state_dict by model_key = %s" % model_key)
-                break
-        if checkpoint_model is None:
+            if not os.path.exists(args.pretrained_checkpoint):
+                 print(f"Error: Pretrained checkpoint file not found at {args.pretrained_checkpoint}")
+                 exit(1)
+            checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu') # Use default weights_only=False for now
+            # Find the actual key used for the model's state_dict
+            checkpoint_model_key = None
+            possible_keys = args.model_key.split('|') + ['state_dict', 'model_state'] # Add more common keys
+            for key in possible_keys:
+                if key in checkpoint:
+                    checkpoint_model_key = key
+                    break
+            if checkpoint_model_key is None:
+                 # If no standard key is found, assume the whole dict is the state_dict
+                 checkpoint_model_key = None # Will assign checkpoint directly later
+
+        if checkpoint_model_key:
+            print(f"Using key '{checkpoint_model_key}' for model state_dict.")
+            checkpoint_model = checkpoint[checkpoint_model_key]
+        else:
+            print("No standard model key found in checkpoint, attempting to load entire dictionary as state_dict.")
             checkpoint_model = checkpoint
-        state_dict = model.state_dict()
-        all_keys = list(checkpoint_model.keys())
-        # print("##########origin keys:", len(all_keys), all_keys)
-        # NOTE: remove all decoder keys
-        all_keys = [key for key in all_keys if key.startswith('encoder.')]
-        print("all keys:", all_keys)
-        for key in all_keys:
-            new_key = key.replace('encoder.','')
-            checkpoint_model[new_key] = checkpoint_model[key]
-            checkpoint_model.pop(key)
 
-        for key in list(checkpoint_model.keys()):
-            if key.startswith('decoder.'):
-                checkpoint_model.pop(key)
-            if key.startswith('teacher.'):
-                checkpoint_model.pop(key)
+        # --- Key Cleaning and Adaptation ---
+        new_state_dict = {}
+        # Determine if prefixes exist consistently
+        has_encoder_prefix = all(k.startswith('encoder.') for k in checkpoint_model.keys() if '.' in k)
+        has_module_prefix = all(k.startswith('module.') for k in checkpoint_model.keys() if '.' in k)
 
-        # NOTE: replace norm with fc_norm
-        for key in list(checkpoint_model.keys()):
-            if key.startswith('norm.'):
-                new_key = key.replace('norm.','fc_norm.')
-                checkpoint_model[new_key] = checkpoint_model[key]
-                checkpoint_model.pop(key)
+        print(f"Checkpoint keys analysis: Consistent 'encoder.' prefix? {has_encoder_prefix}, Consistent 'module.' prefix? {has_module_prefix}")
 
+        num_skipped = 0
+        for k, v in checkpoint_model.items():
+            new_k = k
+            # Strip prefixes only if they were consistently found
+            if has_module_prefix:
+                 new_k = new_k.replace('module.', '', 1)
+            if has_encoder_prefix:
+                 new_k = new_k.replace('encoder.', '', 1)
+
+            # Rename norm layer
+            if new_k.startswith('norm.'):
+                 new_k = new_k.replace('norm.', 'fc_norm.', 1)
+
+            # Skip irrelevant layers
+            if new_k.startswith('decoder.') or new_k.startswith('teacher.') or "relative_position_index" in new_k or new_k.startswith('mask_token'):
+                 num_skipped += 1
+                 continue
+
+            new_state_dict[new_k] = v
+        checkpoint_model = new_state_dict
+        print(f"Skipped {num_skipped} keys (decoder/teacher/pos_index/mask_token).")
+        # --- End Key Cleaning ---
+
+
+        # --- Shape Mismatch Handling (Head) ---
+        model_state_dict = model.state_dict() # Get current model state dict
         for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+            if k in checkpoint_model and k in model_state_dict: # Check if key exists in both
+                 if checkpoint_model[k].shape != model_state_dict[k].shape:
+                     print(f"Removing key {k} from pretrained checkpoint due to shape mismatch: "
+                           f"Checkpoint shape {checkpoint_model[k].shape}, Model shape {model_state_dict[k].shape}")
+                     del checkpoint_model[k]
+            elif k in checkpoint_model and k not in model_state_dict:
+                 print(f"Removing key {k} from pretrained checkpoint as it doesn't exist in the current model.")
+                 del checkpoint_model[k]
+        # --- End Shape Mismatch Handling ---
 
-        if model.use_rel_pos_bias and "rel_pos_bias.relative_position_bias_table" in checkpoint_model:
-            print("Expand the shared relative position embedding to each transformer block. ")
-            num_layers = model.get_num_layers()
-            rel_pos_bias = checkpoint_model["rel_pos_bias.relative_position_bias_table"]
-            for i in range(num_layers):
-                checkpoint_model["blocks.%d.attn.relative_position_bias_table" % i] = rel_pos_bias.clone()
 
-            checkpoint_model.pop("rel_pos_bias.relative_position_bias_table")
+        # --- Relative Position Bias Handling ---
+        if model.use_rel_pos_bias:
+             # Check for old shared format first
+             shared_bias_key = "rel_pos_bias.relative_position_bias_table"
+             if shared_bias_key in checkpoint_model:
+                 print("Expanding shared relative position embedding to each transformer block.")
+                 num_layers = model.get_num_layers()
+                 rel_pos_bias_shared = checkpoint_model.pop(shared_bias_key)
+                 for i in range(num_layers):
+                      block_key = f"blocks.{i}.attn.relative_position_bias_table"
+                      if block_key in model_state_dict: # Only add if the model expects it
+                           checkpoint_model[block_key] = rel_pos_bias_shared.clone()
+                 print(f"Expanded shared bias to {num_layers} blocks.")
 
-        all_keys = list(checkpoint_model.keys())
+             # Now interpolate per-block tables if necessary
+             for k in list(checkpoint_model.keys()):
+                  if "relative_position_bias_table" in k:
+                      if k not in model_state_dict:
+                           print(f"Skipping interpolation for {k}: Key not found in current model.")
+                           continue
 
-        for key in all_keys:
-            if "relative_position_index" in key:
-                checkpoint_model.pop(key)
+                      rel_pos_bias = checkpoint_model[k]
+                      src_num_pos, num_attn_heads = rel_pos_bias.size()
+                      dst_num_pos, _ = model_state_dict[k].size()
 
-            if "relative_position_bias_table" in key and args.rel_pos_bias:
-                rel_pos_bias = checkpoint_model[key]
-                src_num_pos, num_attn_heads = rel_pos_bias.size()
-                dst_num_pos, _ = model.state_dict()[key].size()
-                dst_patch_shape = model.patch_embed.patch_shape
-                if dst_patch_shape[0] != dst_patch_shape[1]:
-                    raise NotImplementedError()
-                num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
-                src_size = int((src_num_pos - num_extra_tokens) ** 0.5)
-                dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)
-                if src_size != dst_size:
-                    print("Position interpolate for %s from %dx%d to %dx%d" % (
-                        key, src_size, src_size, dst_size, dst_size))
-                    extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
-                    rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
+                      if src_num_pos == dst_num_pos:
+                           continue # No interpolation needed if sizes match
 
-                    def geometric_progression(a, r, n):
-                        return a * (1.0 - r ** n) / (1.0 - r)
+                      dst_patch_shape = model.patch_embed.patch_shape
+                      num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
 
-                    left, right = 1.01, 1.5
-                    while right - left > 1e-6:
-                        q = (left + right) / 2.0
-                        gp = geometric_progression(1, q, src_size // 2)
-                        if gp > dst_size // 2:
-                            right = q
-                        else:
-                            left = q
+                      # Ensure src_num_pos is large enough
+                      if src_num_pos <= num_extra_tokens:
+                          print(f"Warning: Source table size {src_num_pos} too small for extra tokens {num_extra_tokens} in key {k}. Skipping interpolation.")
+                          # Remove the key from checkpoint if it can't be interpolated? Or keep as is?
+                          # For now, remove to avoid loading errors, but this indicates a potential issue.
+                          del checkpoint_model[k]
+                          continue
 
-                    dis = []
-                    cur = 1
-                    for i in range(src_size // 2):
-                        dis.append(cur)
-                        cur += q ** (i + 1)
+                      src_size_sq = src_num_pos - num_extra_tokens
+                      # Ensure src_size_sq is non-negative and a perfect square
+                      if src_size_sq < 0 or int(src_size_sq**0.5)**2 != src_size_sq:
+                           print(f"Warning: Calculated source size squared ({src_size_sq}) is invalid for key {k}. Skipping interpolation.")
+                           del checkpoint_model[k]
+                           continue
+                      src_size = int(src_size_sq**0.5)
 
-                    r_ids = [-_ for _ in reversed(dis)]
+                      dst_size_sq = dst_num_pos - num_extra_tokens
+                      if dst_size_sq < 0 or int(dst_size_sq**0.5)**2 != dst_size_sq:
+                           print(f"Warning: Calculated destination size squared ({dst_size_sq}) is invalid for key {k}. Skipping interpolation.")
+                           # This case is less likely if the model definition is correct, but good to check.
+                           del checkpoint_model[k]
+                           continue
+                      dst_size = int(dst_size_sq**0.5)
 
-                    x = r_ids + [0] + dis
-                    y = r_ids + [0] + dis
 
-                    t = dst_size // 2.0
-                    dx = np.arange(-t, t + 0.1, 1.0)
-                    dy = np.arange(-t, t + 0.1, 1.0)
+                      if src_size == 0 or dst_size == 0:
+                           print(f"Warning: Calculated src ({src_size}) or dst ({dst_size}) size is zero for key {k}. Skipping interpolation.")
+                           del checkpoint_model[k]
+                           continue
 
-                    print("Original positions = %s" % str(x))
-                    print("Target positions = %s" % str(dx))
+                      print(f"Interpolating position embedding for {k} from {src_size}x{src_size} to {dst_size}x{dst_size}")
 
-                    all_rel_pos_bias = []
+                      extra_tokens = rel_pos_bias[-num_extra_tokens:, :] if num_extra_tokens > 0 else None
+                      rel_pos_bias_core = rel_pos_bias[:-num_extra_tokens, :] if num_extra_tokens > 0 else rel_pos_bias
 
-                    for i in range(num_attn_heads):
-                        z = rel_pos_bias[:, i].view(src_size, src_size).float().numpy()
-                        f = interpolate.interp2d(x, y, z, kind='cubic')
-                        all_rel_pos_bias.append(
-                            torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device))
+                      # --- Geometric progression calculation ---
+                      left, right = 1.01, 1.5
+                      while right - left > 1e-6:
+                           q = (left + right) / 2.0
+                           gp = lambda a, r, n: a * (1.0 - r ** n) / (1.0 - r) if r != 1.0 else a * n
+                           calculated_gp = gp(1, q, src_size // 2) if src_size // 2 > 0 else 0
+                           if calculated_gp > dst_size // 2:
+                                right = q
+                           else:
+                                left = q
+                      q = (left + right) / 2.0
+                      dis = []
+                      cur = 1
+                      for i in range(src_size // 2):
+                           dis.append(cur)
+                           cur += q ** (i + 1)
+                      r_ids = [-x for x in reversed(dis)]
+                      x = r_ids + [0] + dis
+                      y = x # Assuming square patches/tables
+                      # --- Interpolation ---
+                      t = dst_size / 2.0 # Use float division
+                      dx = np.arange(-t + 0.5, t - 0.4, 1.0) # Adjust range slightly for better centering?
+                      dy = dx
+                      # Check if grid sizes are valid for interp2d
+                      if len(x) < 2 or len(y) < 2:
+                           print(f"Warning: Source grid size too small ({len(x)}x{len(y)}) for interpolation in key {k}. Skipping.")
+                           del checkpoint_model[k]
+                           continue
 
-                    rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                      all_rel_pos_bias = []
+                      for head_i in range(num_attn_heads):
+                           z = rel_pos_bias_core[:, head_i].view(src_size, src_size).float().numpy()
+                           try:
+                                f = interpolate.interp2d(x, y, z, kind='cubic')
+                                interpolated_bias = torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device)
+                                all_rel_pos_bias.append(interpolated_bias)
+                           except Exception as interp_e:
+                                print(f"Error during interpolation for key {k}, head {head_i}: {interp_e}. Skipping key.")
+                                # Remove the problematic key and break inner loop
+                                if k in checkpoint_model: del checkpoint_model[k]
+                                all_rel_pos_bias = [] # Reset list
+                                break # Stop processing heads for this key
 
-                    new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
-                    checkpoint_model[key] = new_rel_pos_bias
+                      if not all_rel_pos_bias: # If interpolation failed for any head
+                           continue # Skip to next key
 
-        print("##############new keys:", len(checkpoint_model), checkpoint_model.keys())
+                      rel_pos_bias_interpolated = torch.cat(all_rel_pos_bias, dim=-1)
+                      # --- Combine with extra tokens ---
+                      if extra_tokens is not None:
+                           # Ensure shapes match for concatenation
+                           if rel_pos_bias_interpolated.shape[0] + extra_tokens.shape[0] == dst_num_pos:
+                                new_rel_pos_bias = torch.cat((rel_pos_bias_interpolated, extra_tokens), dim=0)
+                           else:
+                               print(f"Warning: Shape mismatch after interpolation for {k}. Expected {dst_num_pos}, got {rel_pos_bias_interpolated.shape[0] + extra_tokens.shape[0]}. Skipping key.")
+                               del checkpoint_model[k]
+                               continue
+                      else:
+                           if rel_pos_bias_interpolated.shape[0] == dst_num_pos:
+                                new_rel_pos_bias = rel_pos_bias_interpolated
+                           else:
+                               print(f"Warning: Shape mismatch after interpolation for {k} (no extra tokens). Expected {dst_num_pos}, got {rel_pos_bias_interpolated.shape[0]}. Skipping key.")
+                               del checkpoint_model[k]
+                               continue
+                      checkpoint_model[k] = new_rel_pos_bias
+        # --- End Relative Position Bias Handling ---
 
-        # TODO interpolate position embedding if need
-
-        utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+        print("Attempting to load state dict...")
+        load_result = utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
+        print(load_result) # Print missing/unexpected keys message
+    # --- End Load Pretrained Checkpoint ---
 
     model.to(device)
 
@@ -612,37 +866,45 @@ def main(args, ds_init):
             resume='')
         print("Using EMA with decay = %.8f" % args.model_ema_decay)
 
-    model_without_ddp = model
+    model_without_ddp = model # Assign before potential DDP wrapping
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     print("Model = %s" % str(model_without_ddp))
-    print('number of params:', n_parameters)
+    print(f'Number of params (M): {n_parameters / 1.e6:.2f}') # Use f-string
 
     total_batch_size = args.batch_size * args.update_freq * utils.get_world_size()
-    num_training_steps_per_epoch = len(dataset_train) // total_batch_size
+    num_training_steps_per_epoch = len(dataset_train) // total_batch_size if len(dataset_train) > 0 else 0
+
 
     print("LR = %.8f" % args.lr)
     print("Batch size = %d" % total_batch_size)
     print("Update frequent = %d" % args.update_freq)
     print("Number of training examples = %d" % len(dataset_train))
-    print("Number of training training per epoch = %d" % num_training_steps_per_epoch)
+    print("Number of training steps per epoch = %d" % num_training_steps_per_epoch)
 
+
+    # --- Layer Decay Setup ---
     num_layers = model_without_ddp.get_num_layers()
     if args.layer_decay < 1.0:
         assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
+        print("Using layer decay:", args.layer_decay)
     else:
         assigner = None
+        print("Not using layer decay (layer_decay >= 1.0)")
+
 
     if assigner is not None:
-        print("Assigned values = %s" % str(assigner.values))
+        print("Assigned layer decay values = %s" % str(assigner.values))
+    # --- End Layer Decay Setup ---
 
     skip_weight_decay_list = model.no_weight_decay()
-    print("Skip weight decay list: ", skip_weight_decay_list)
-
     if args.disable_weight_decay_on_rel_pos_bias:
         for i in range(num_layers):
             skip_weight_decay_list.add("blocks.%d.attn.relative_position_bias_table" % i)
+    print("Skip weight decay list: ", skip_weight_decay_list)
 
+
+    # --- Optimizer and Scaler Setup ---
     if args.enable_deepspeed:
         loss_scaler = None
         optimizer_params = get_parameter_groups(
@@ -652,150 +914,391 @@ def main(args, ds_init):
         model, optimizer, _, _ = ds_init(
             args=args, model=model, model_parameters=optimizer_params, dist_init_required=not args.distributed,
         )
-
+        print("Using DeepSpeed optimizer.")
         print("model.gradient_accumulation_steps() = %d" % model.gradient_accumulation_steps())
         assert model.gradient_accumulation_steps() == args.update_freq
     else:
         if args.distributed:
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
-            model_without_ddp = model.module
+            print("Wrapping model with DistributedDataParallel.")
+            # find_unused_parameters can be True if parts of model aren't used (e.g., lin probe)
+            # Set to False if confident all params are used, might be slightly faster
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=False)
+            model_without_ddp = model.module # Update model_without_ddp reference
 
         optimizer = create_optimizer(
             args, model_without_ddp, skip_list=skip_weight_decay_list,
             get_num_layer=assigner.get_layer_id if assigner is not None else None,
             get_layer_scale=assigner.get_scale if assigner is not None else None)
         loss_scaler = NativeScaler()
+        print(f"Using optimizer: {args.opt}")
+    # --- End Optimizer and Scaler Setup ---
 
-    if not args.eval:
-        print("Use step level LR scheduler!")
 
+    # --- LR Scheduler and WD Scheduler Setup ---
+    if num_training_steps_per_epoch <= 0:
+         print("Warning: num_training_steps_per_epoch is zero or negative. Skipping scheduler setup. Check dataset/batch size.")
+         lr_schedule_values = None
+         wd_schedule_values = None
+    else:
+        print("LR Scheduler = cosine")
         lr_schedule_values = utils.cosine_scheduler(
             args.lr, args.min_lr, args.epochs, num_training_steps_per_epoch,
             warmup_epochs=args.warmup_epochs, warmup_steps=args.warmup_steps,
         )
+        # Setup weight decay scheduler
         if args.weight_decay_end is None:
-            args.weight_decay_end = args.weight_decay
+            args.weight_decay_end = args.weight_decay # Use constant WD if end not specified
+            print("Using constant weight decay:", args.weight_decay)
+            wd_schedule_values = None # Indicate constant WD
+        else:
+            print(f"Using cosine weight decay schedule: {args.weight_decay} -> {args.weight_decay_end}")
             wd_schedule_values = utils.cosine_scheduler(
                 args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
             print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
-
-        # MODIFICATION: Calculate class weights and apply them to the loss function
-        label_counts = dataset_train.count_label("binary_label" if binary else "label")
-        total_samples = sum(label_counts)
-        class_weights_list = [total_samples / (len(label_counts) * count) for count in label_counts]
-        class_weights = torch.tensor(class_weights_list, device=device)
-        # print("Using Class Weights for Loss:", class_weights)
-
-        if mixup_fn is not None:
-            # smoothing is handled with mixup label transform
-            criterion = SoftTargetCrossEntropy()
-        elif args.smoothing > 0.:
-            criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-        else:
-            # Apply the calculated class weights here
-            print("Using Class Weights for Loss:", class_weights)
-            # NOTE - This might be the best way to address imbalanced datasets
-            criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    # --- End LR Scheduler and WD Scheduler Setup ---
 
 
-        print("criterion = %s" % str(criterion))
+    # --- Loss Function Setup ---
+    # Calculate class weights for the loss function (needs to be done only once)
+    try:
+        label_column_loss = "binary_label" if binary else "label"
+        label_counts_loss = dataset_train.count_label(label_column_loss)
+        total_samples_loss = sum(label_counts_loss)
+        # Ensure counts are not zero before division
+        class_weights_list = [total_samples_loss / (len(label_counts_loss) * count) if count > 0 else 0 for count in label_counts_loss.values] # Use .values
+        class_weights = torch.tensor(class_weights_list, device=device, dtype=torch.float) # Ensure float
+        print("Calculated Class Weights for Loss:", class_weights)
+        if torch.any(class_weights <= 0):
+             print("Warning: Some class weights are zero or negative. Check label counts.")
+    except Exception as e:
+        print(f"Error calculating class weights for loss: {e}. Using uniform weights.")
+        class_weights = None # Fallback to no weights
 
-        utils.auto_load_model(
-            args=args, model=model, model_without_ddp=model_without_ddp,
-            optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+    # Choose criterion based on mixup/smoothing and apply weights
+    if mixup_fn is not None:
+        # Mixup handles smoothing, use custom weighted loss for soft targets
+        print("Using WeightedLabelSmoothingCrossEntropy with MixUp")
+        criterion = WeightedLabelSmoothingCrossEntropy(smoothing=args.smoothing, class_weights=class_weights)
+    elif args.smoothing > 0.:
+        # Use custom weighted loss with label smoothing
+        print("Using WeightedLabelSmoothingCrossEntropy")
+        criterion = WeightedLabelSmoothingCrossEntropy(smoothing=args.smoothing, class_weights=class_weights)
+    else:
+        # Standard CrossEntropyLoss already accepts weights
+        print("Using standard nn.CrossEntropyLoss with weights")
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights) # Pass tensor directly
 
-    elif args.eval:
-        epoch=0
-        model_weight = args.resume
-        model_dict = torch.load(model_weight)
-        model.load_state_dict(model_dict['model'])
+    print("criterion = %s" % str(criterion))
+    # --- End Loss Function Setup ---
+
+
+    # --- Load Checkpoint ---
+    # Load checkpoint AFTER defining optimizer, criterion, model EMA etc.
+    # Ensures scheduler state, etc., are loaded if present in checkpoint
+    print("Attempting to load model/optimizer/scaler state...")
+    utils.auto_load_model(
+        args=args, model=model, model_without_ddp=model_without_ddp,
+        optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
+    # --- End Load Checkpoint ---
+
+
+    # --- Evaluation Mode ---
+    if args.eval:
+        epoch=args.start_epoch # Use start epoch from loaded checkpoint if available
+        print(f"--- Starting Evaluation Only Mode (Epoch {epoch}) ---")
+        if data_loader_test is None:
+             print("Error: Test data loader not available for evaluation. Check sampler setup.")
+             exit(1)
+
+        # Ensure model is in eval mode
+        model.eval()
+
         if args.TTA:
-            print(f"Starting evaluation with tta")
+            print(f"Starting evaluation with TTA")
+            # Assuming evaluate_tta handles distributed eval internally if needed
             test_res, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch, mode='test',
                                                 num_class=args.nb_classes)
         else:
-            print(f"Starting evaluation without tta")
+            print(f"Starting evaluation without TTA")
+            # Assuming evaluate handles distributed eval internally if needed
             test_res, wandb_res = evaluate(data_loader_test, model, device,args.output_dir, epoch, mode='test',
                                         num_class=args.nb_classes)
-            print('TTTTTTTTT',test_res)
+            print('Test Results:', test_res)
+            # Log results if needed
+            if utils.is_main_process():
+                 print("Logging evaluation results to WandB...")
+                 wandb.log({f"eval_{k}": v for k,v in wandb_res.items()})
 
-        exit(0)
-    else:
-        print(args.eval)
+        exit(0) # Exit after evaluation
+    # --- End Evaluation Mode ---
 
+
+    # --- Training Loop ---
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    max_accuracy = 0.0
-    max_auc = 0.0
-    max_performance = 0.0
+
+    # --- EARLY STOPPING INITIALIZATION ---
+    best_val_score = None
+    epochs_no_improve = 0
+    # Determine if higher score is better based on the monitor metric
+    higher_is_better = args.monitor not in ['loss', 'Val Loss'] # Check against 'loss' and potential wandb key
+    print(f"Early Stopping Monitor: {args.monitor}, Higher is better: {higher_is_better}, Patience: {args.early_stopping_patience}, Delta: {args.early_stopping_delta}")
+    # --- END EARLY STOPPING INITIALIZATION ---
+
+    # --- HISTORY LISTS INITIALIZATION ---
+    train_loss_hist = []
+    val_loss_hist = []
+    val_acc_hist = []
+    val_bacc_hist = []
+    val_auc_hist = []
+    # --- END HISTORY LISTS INITIALIZATION ---
+
+    final_epoch = args.start_epoch # Initialize final_epoch to start_epoch
+
+
     for epoch in range(args.start_epoch, args.epochs):
-        # The .set_epoch() method is specific to the DistributedSampler and is needed
-        # to ensure proper shuffling in a multi-GPU environment. The WeightedRandomSampler
-        # does not have this method. This check prevents an AttributeError.
-        if args.distributed and isinstance(data_loader_train.sampler, torch.utils.data.DistributedSampler):
-            data_loader_train.sampler.set_epoch(epoch)
+        final_epoch = epoch # Update last completed epoch number
+        if args.distributed:
+             # Need to set epoch for DistributedSampler, but not WeightedRandomSampler
+             if isinstance(data_loader_train.sampler, torch.utils.data.DistributedSampler):
+                 print(f"Setting epoch {epoch} for DistributedSampler.")
+                 data_loader_train.sampler.set_epoch(epoch)
+             # else: print("Sampler is not DistributedSampler, not setting epoch.") # Optional debug print
+
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
 
+        print(f"\n--- Starting Epoch {epoch} ---")
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer,
             device, epoch, loss_scaler, args.clip_grad, model_ema, mixup_fn,
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
-            args=args
         )
-        val_stats, wandb_res = evaluate(data_loader_val, model, device, args.output_dir, epoch, mode='val',
-                                        num_class=args.nb_classes)
-        print('--------------------------',wandb_res)
-        # val_bacc, val_auc_roc, valwf1,val_sen,val_spec = wandb_res['Val Balanced Accuracy'], wandb_res['Val AUC-ROC'], wandb_res['Val F1'],wandb_res['Val Sensitivity'],wandb_res['Val Specificity']
-        val_bacc, val_acc, val_auc_roc, valwf1, val_mean_recall = wandb_res['Val BAcc'], wandb_res['Val Acc'] , wandb_res['Val ROC'], \
-            wandb_res['Val W_F1'], wandb_res['Val Recall_macro']
-        wandb.log(wandb_res)
-        if args.nb_classes == 2:
-            if max_performance < val_auc_roc:
-                max_performance = val_auc_roc
-                if args.output_dir:
-                    utils.save_model(
-                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
-            print(f'Max AUCROC: {max_performance:.2f}%')
-        elif args.monitor == 'acc':
 
-            if max_performance < val_acc:
-                max_performance = val_acc
-                if args.output_dir:
-                    utils.save_model(
-                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
-            print(f'Max val mean accuracy: {max_performance:.2f}%') 
+        # --- Validation Step ---
+        # Only run validation if data loader exists (handles non-rank 0 in non-dist-eval)
+        # And respect disable_eval_during_finetuning flag
+        current_val_score = None # Initialize
+        wandb_res = {} # Initialize empty dict for logging
+        if data_loader_val is not None and not args.disable_eval_during_finetuning:
+            print(f"--- Starting Validation Epoch {epoch} ---")
+            val_stats, wandb_res = evaluate(data_loader_val, model, device, args.output_dir, epoch, mode='val',
+                                            num_class=args.nb_classes)
+            print('-------------------------- Validation Results:', wandb_res)
 
-        elif args.monitor == 'recall':
-            if max_performance < val_mean_recall:
-                max_performance = val_mean_recall
-                if args.output_dir:
-                    utils.save_model(
-                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
-            print(f'Max val mean recall: {max_performance:.2f}%')
+            # --- APPEND METRICS TO HISTORY LISTS ---
+            try:
+                # Use .get() for safety in case a key is missing from train_stats or wandb_res
+                train_loss_hist.append(train_stats.get('loss', float('nan')))
+                val_loss_hist.append(wandb_res.get('Val Loss', float('nan')))
+                val_acc_hist.append(wandb_res.get('Val Acc', float('nan')))
+                val_bacc_hist.append(wandb_res.get('Val BAcc', float('nan')))
+                val_auc_hist.append(wandb_res.get('Val ROC', float('nan')))
+            except Exception as hist_e:
+                print(f"Warning: Error appending metrics to history lists: {hist_e}")
+            # --- END APPEND METRICS ---
 
-        if epoch == (args.epochs - 1):
-            model_weight = args.output_dir + '/' + 'checkpoint-best.pth'
-            model_dict = torch.load(model_weight)
-            model.load_state_dict(model_dict['model'])
-            if args.TTA:
-                print(f"Starting test with tta")
-                test_stats, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch,
+
+            # --- EARLY STOPPING & BEST CHECKPOINT LOGIC ---
+            # Map common monitor args to potential wandb keys
+            monitor_key_map = {
+                'acc': 'Val Acc', 'accuracy': 'Val Acc',
+                'bacc': 'Val BAcc', 'balanced_accuracy': 'Val BAcc',
+                'recall': 'Val Recall_macro', 'recall_macro': 'Val Recall_macro',
+                'auc': 'Val ROC', 'roc': 'Val ROC', 'auc-roc':'Val ROC',
+                'loss': 'Val Loss',
+                'f1': 'Val W_F1', 'f1_weighted': 'Val W_F1'
+            }
+            monitor_key = monitor_key_map.get(args.monitor.lower(), args.monitor)
+            current_val_score = wandb_res.get(monitor_key)
+
+            if current_val_score is None:
+                 print(f"Warning: Monitored metric key '{monitor_key}' (derived from '{args.monitor}') not found in validation results: {wandb_res.keys()}. Skipping improvement check for epoch {epoch}.")
+            else:
+                print(f"Epoch {epoch} - Monitored Metric ({args.monitor} -> {monitor_key}): {current_val_score:.4f}")
+                improved = False
+                if best_val_score is None: # First epoch with a valid score
+                    best_val_score = current_val_score
+                    improved = True
+                    print("Initialized best validation score.")
+                elif higher_is_better:
+                    if current_val_score > best_val_score + args.early_stopping_delta:
+                        print(f"Improvement detected: {current_val_score:.4f} > {best_val_score:.4f} + {args.early_stopping_delta}")
+                        best_val_score = current_val_score
+                        improved = True
+                    # else: print(f"No improvement: {current_val_score:.4f} <= {best_val_score:.4f} + {args.early_stopping_delta}") # Redundant print
+                else: # Lower is better (e.g., loss)
+                    if current_val_score < best_val_score - args.early_stopping_delta:
+                        print(f"Improvement detected: {current_val_score:.4f} < {best_val_score:.4f} - {args.early_stopping_delta}")
+                        best_val_score = current_val_score
+                        improved = True
+                    # else: print(f"No improvement: {current_val_score:.4f} >= {best_val_score:.4f} - {args.early_stopping_delta}") # Redundant print
+
+                if improved:
+                    print(f"Validation score improved to {best_val_score:.4f}. Saving best model.")
+                    epochs_no_improve = 0
+                    if args.output_dir and args.save_ckpt:
+                        utils.save_model(
+                            args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                            loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                else:
+                    epochs_no_improve += 1
+                    if best_val_score is not None:
+                         print(f"Validation score did not improve for {epochs_no_improve} epoch(s). Best score: {best_val_score:.4f}")
+                    # else: print(f"Validation score did not improve for {epochs_no_improve} epoch(s). (Best score not yet established).") # Redundant
+
+        elif args.disable_eval_during_finetuning:
+             print(f"Skipping validation for epoch {epoch} as per --disable_eval_during_finetuning.")
+             # If eval is disabled, we might want to save based on epoch number or just save the last one
+             if args.output_dir and args.save_ckpt: # Save last checkpoint if eval disabled
+                  print("Saving model checkpoint (last epoch since validation is disabled).")
+                  utils.save_model(
+                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                         loss_scaler=loss_scaler, epoch='last_no_eval', model_ema=model_ema)
+
+        # --- SAVE REGULAR CHECKPOINT (even if validation skipped) ---
+        if args.output_dir and args.save_ckpt and (epoch + 1) % args.save_ckpt_freq == 0:
+             print(f"Saving checkpoint for epoch {epoch}...")
+             utils.save_model(
+                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                 loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema)
+
+        # --- LOGGING ---
+        # Combine train stats and validation results (wandb_res) for logging
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                      **wandb_res, # Log all validation metrics directly (will be empty if eval skipped)
+                      'epoch': epoch,
+                      'n_parameters': n_parameters}
+
+        if utils.is_main_process(): # Ensure wandb logs only on main process
+             try:
+                wandb.log(log_stats)
+             except Exception as wandb_e:
+                 print(f"Warning: Failed to log metrics to WandB for epoch {epoch}: {wandb_e}")
+
+
+        # Log to local file
+        if args.output_dir and utils.is_main_process():
+            if log_writer is not None:
+                log_writer.flush()
+            try:
+                with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_stats) + "\n")
+            except Exception as log_e:
+                 print(f"Warning: Failed to write to local log file for epoch {epoch}: {log_e}")
+
+
+        # --- EARLY STOPPING CHECK ---
+        # Only check if validation was performed and score was found
+        if current_val_score is not None and args.early_stopping_patience > 0 and epochs_no_improve >= args.early_stopping_patience:
+            print(f"\nEarly stopping triggered after {epoch + 1} epochs due to no improvement in {args.monitor} for {args.early_stopping_patience} consecutive epochs.")
+            # final_epoch already updated at start of loop
+            break # Exit the training loop
+        # --- END EARLY STOPPING CHECK ---
+
+    # --- End Training Loop ---
+
+    # --- FINAL TESTING ---
+    # Run final test only if not in eval mode and if a best checkpoint was likely saved (or eval wasn't disabled)
+    if not args.eval and data_loader_test is not None:
+        print("\n--- Starting Final Testing Phase ---")
+        best_ckpt_path = os.path.join(args.output_dir, 'checkpoint-best.pth')
+        last_ckpt_path = os.path.join(args.output_dir, f'checkpoint-{final_epoch}.pth') # Use actual final epoch
+        last_no_eval_ckpt_path = os.path.join(args.output_dir, 'checkpoint-last_no_eval.pth')
+
+        model_weight_to_load = None
+        if args.disable_eval_during_finetuning and os.path.exists(last_no_eval_ckpt_path):
+             model_weight_to_load = last_no_eval_ckpt_path
+             print(f"Loading last checkpoint '{model_weight_to_load}' for final test (eval was disabled).")
+        elif os.path.exists(best_ckpt_path):
+            model_weight_to_load = best_ckpt_path
+            print(f"Loading best checkpoint '{model_weight_to_load}' for final test.")
+        elif os.path.exists(last_ckpt_path):
+             model_weight_to_load = last_ckpt_path
+             print(f"Warning: Best checkpoint not found. Loading last epoch checkpoint '{model_weight_to_load}' for final test.")
+        else:
+            print(f"Warning: No best or last checkpoint found in {args.output_dir}. Skipping final test.")
+
+        if model_weight_to_load:
+            try:
+                # Load checkpoint onto CPU first
+                model_dict = torch.load(model_weight_to_load, map_location='cpu')
+
+                # Determine the model to load into
+                load_model = model_without_ddp # Load into the base model
+
+                # Get the state dict
+                state_dict_to_load = model_dict.get('model', model_dict) # Handle different save formats
+
+                # Check and adjust keys for DDP vs non-DDP mismatch
+                is_ddp_checkpoint = all(k.startswith('module.') for k in state_dict_to_load.keys())
+
+                adjusted_state_dict = {}
+                if is_ddp_checkpoint:
+                     print("Adjusting keys: Removing 'module.' prefix from checkpoint.")
+                     adjusted_state_dict = {k.replace('module.', '', 1): v for k, v in state_dict_to_load.items()}
+                else:
+                     adjusted_state_dict = state_dict_to_load
+
+                # Load the adjusted state dict
+                missing_keys, unexpected_keys = load_model.load_state_dict(adjusted_state_dict, strict=False)
+                if missing_keys: print("Warning: Missing keys during final test model load:", missing_keys)
+                if unexpected_keys: print("Warning: Unexpected keys during final test model load:", unexpected_keys)
+
+                # Ensure the model is back on the correct device for evaluation
+                load_model.to(device)
+
+                # Use the potentially DDP-wrapped model if evaluation needs to be distributed
+                # For final testing, usually done on a single GPU (rank 0) or all GPUs via dist_eval in evaluate func
+                eval_model = model # Pass the main model (potentially DDP wrapped) to evaluate functions
+
+                # --- Perform Final Evaluation ---
+                if args.TTA:
+                    print(f"Starting final test with TTA using loaded model.")
+                    test_stats, _ = evaluate_tta(data_loader_test, eval_model, device, args.output_dir, epoch='best_or_last',
                                                     mode='test',
                                                     num_class=args.nb_classes)
-            else:
-                print(f"Starting test without tta")
-                test_stats, wandb_test = evaluate(data_loader_test, model, device, args.output_dir, epoch, mode='test',
-                                                  num_class=args.nb_classes)
-                wandb.log(wandb_test)
+                else:
+                    print(f"Starting final test without TTA using loaded model.")
+                    test_stats, wandb_test = evaluate(data_loader_test, eval_model, device, args.output_dir, epoch='best_or_last',
+                                                      mode='test',
+                                                      num_class=args.nb_classes)
+                    if utils.is_main_process(): # Log final test metrics
+                         final_test_metrics = {f"final_test_{k}": v for k, v in wandb_test.items()}
+                         print("Final Test Results:", final_test_metrics)
+                         try:
+                              wandb.log(final_test_metrics)
+                         except Exception as wandb_e:
+                              print(f"Warning: Failed to log final test metrics to WandB: {wandb_e}")
+            except Exception as load_e:
+                 print(f"Error loading model checkpoint {model_weight_to_load} for final testing: {load_e}")
+
+    # --- End Final Testing ---
+
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    print('\nTotal Training time {}'.format(total_time_str))
+
+    # --- PLOT CURVES AFTER TRAINING ---
+    # Ensure history lists are populated before plotting
+    if utils.is_main_process() and args.output_dir and train_loss_hist: # Check if training actually ran
+        history = {
+            'train_loss': train_loss_hist,
+            'val_loss': val_loss_hist,
+            'val_acc': val_acc_hist,
+            'val_bacc': val_bacc_hist,
+            'val_auc': val_auc_hist
+        }
+        # Use final_epoch + 1 if loop completed, or final_epoch if it broke early
+        epochs_completed = final_epoch if final_epoch < args.epochs else args.epochs
+        print(f"Plotting curves for {epochs_completed} completed epochs.")
+        plot_training_curves(history, args.output_dir, epochs_completed)
+    elif utils.is_main_process():
+         print("Skipping curve plotting (no training epochs completed or no output directory).")
+    # --- END PLOT CURVES ---
 
 
 if __name__ == '__main__':
@@ -806,13 +1309,35 @@ if __name__ == '__main__':
     opts, ds_init = get_args()
     print("Args received")
 
-    project_name = 'FM_FT_screening' if not opts.eval else 'panderm-finetune'
-    wandb.init(
-        project=project_name,
-        name=opts.wandb_name,
-        notes="baselines", \
-        config=opts)
+    # Initialize wandb only in the main process
+    # Check if WANDB_API_KEY is set, otherwise disable W&B
+    wandb_enabled = os.environ.get("WANDB_API_KEY") is not None and utils.is_main_process()
+
+    if wandb_enabled:
+        try:
+            project_name = 'FM_FT_screening' if not opts.eval else 'panderm-finetune-eval'
+            wandb.init(
+                project=project_name,
+                name=opts.wandb_name,
+                notes="baselines",
+                config=opts)
+            print("WandB initialized successfully.")
+        except Exception as e:
+            print(f"Error initializing WandB: {e}. Disabling WandB logging.")
+            wandb_enabled = False # Disable if init fails
+            wandb = None # Set wandb to None to avoid errors later
+    else:
+        print("WandB disabled (API key not found or not main process).")
+        wandb = None # Set wandb to None
+
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
     main(opts, ds_init)
-    wandb.finish()
+
+    # Finish wandb run only in the main process if it was enabled
+    if wandb_enabled and wandb is not None:
+        try:
+            wandb.finish()
+            print("WandB finished successfully.")
+        except Exception as e:
+            print(f"Error finishing WandB run: {e}")
