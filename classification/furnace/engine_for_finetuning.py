@@ -81,7 +81,7 @@ def train_class_batch(model, samples, target, criterion):
     # --- END CHECK ---
     loss = criterion(outputs, target)
     # print_tensor_stats(loss, name="Calculated Loss")
-    print(flush=True)
+    # print(flush=True)
     return loss, outputs
 
 
@@ -368,7 +368,7 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
         true_label = F.one_hot(target.to(torch.int64), num_classes=num_class)
 
         # compute output
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             output = model(images)
             loss = criterion(output, target)
 
