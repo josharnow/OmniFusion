@@ -136,9 +136,8 @@ ${PYTHON} run_class_finetuning.py \
     --early_stopping_patience ${EARLY_STOPPING_PATIENCE} \
     --early_stopping_delta ${EARLY_STOPPING_DELTA} \
     --TTA \
-    --disable_amp
-    
-    # --weights \
+    --disable_amp ${DISABLE_AMP} \
+    --weights 
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
