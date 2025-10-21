@@ -15,7 +15,6 @@ import os
 import math
 import time
 import json
-import sys
 from collections import defaultdict, deque
 import datetime
 import numpy as np
@@ -227,18 +226,18 @@ class MetricLogger(object):
                         i, len(iterable), eta=eta_string,
                         meters=str(self),
                         time=str(iter_time), data=str(data_time),
-                        memory=torch.cuda.max_memory_allocated() / MB), flush=True, file=sys.stderr)
+                        memory=torch.cuda.max_memory_allocated() / MB), flush=True)
                 else:
                     print(log_msg.format(
                         i, len(iterable), eta=eta_string,
                         meters=str(self),
-                        time=str(iter_time), data=str(data_time)), flush=True, file=sys.stderr)
+                        time=str(iter_time), data=str(data_time)), flush=True)
             i += 1
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('{} Total time: {} ({:.4f} s / it)'.format(
-            header, total_time_str, total_time / len(iterable)), file=sys.stderr)
+            header, total_time_str, total_time / len(iterable)))
 
 
 class TensorboardLogger(object):
