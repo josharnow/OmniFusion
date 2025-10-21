@@ -48,6 +48,37 @@ import torch.nn.functional as F
 from torch import nn
 import furnace.utils as utils
 from scipy import interpolate
+from typing import Any, Dict
+
+
+def load_checkpoint(path: str, map_location: str = 'cpu', allow_fallback: bool = True):
+    """Load a checkpoint with PyTorch 2.6 safety defaults while allowing trusted fallbacks."""
+    load_kwargs: Dict[str, Any] = {'map_location': map_location}
+    used_weights_only = False
+
+    serialization = getattr(torch, 'serialization', None)
+    if serialization is not None and hasattr(serialization, 'add_safe_globals'):
+        try:
+            allowlist = []
+            np_multiarray = getattr(np.core, 'multiarray', None)
+            scalar_cls = getattr(np_multiarray, 'scalar', None) if np_multiarray is not None else None
+            if scalar_cls is not None:
+                allowlist.append(scalar_cls)
+            if allowlist:
+                serialization.add_safe_globals(allowlist)
+            load_kwargs['weights_only'] = True
+            used_weights_only = True
+        except Exception as safe_err:
+            print(f"Warning: Failed to register safe globals for numpy scalar when loading {path}: {safe_err}")
+
+    try:
+        return torch.load(path, **load_kwargs)
+    except Exception as load_err:
+        if used_weights_only and allow_fallback:
+            print(f"Safe load failed for {path} (weights_only=True). Retrying with weights_only=False. Error: {load_err}")
+            load_kwargs.pop('weights_only', None)
+            return torch.load(path, **load_kwargs)
+        raise
 
 # --- NEW, CORRECTED LOSS CLASS ---
 class WeightedLabelSmoothingCrossEntropy(nn.Module):
@@ -653,7 +684,7 @@ def main(args, ds_init):
             if not os.path.exists(args.pretrained_checkpoint):
                  print(f"Error: Pretrained checkpoint file not found at {args.pretrained_checkpoint}")
                  exit(1)
-            checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu') # Use default weights_only=False for now
+            checkpoint = load_checkpoint(args.pretrained_checkpoint, map_location='cpu')
             # Find the actual key used for the model's state_dict
             checkpoint_model_key = None
             possible_keys = args.model_key.split('|') + ['state_dict', 'model_state'] # Add more common keys
@@ -1225,7 +1256,7 @@ def main(args, ds_init):
         if model_weight_to_load:
             try:
                 # Load checkpoint onto CPU first
-                model_dict = torch.load(model_weight_to_load, map_location='cpu')
+                model_dict = load_checkpoint(model_weight_to_load, map_location='cpu')
 
                 # Determine the model to load into
                 load_model = model_without_ddp # Load into the base model
