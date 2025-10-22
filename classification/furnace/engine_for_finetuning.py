@@ -200,7 +200,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     optimizer.zero_grad()
 
-    if args and args.disable_amp:
+    if args and args.disable_amp == 1:
         print("Training in Full Precision (FP32) mode.")
     else:
         print("Automatic Mixed Precision (AMP) is enabled.")
@@ -229,7 +229,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         # TODO - Change conditional to look for --disable-amp flag
         # if loss_scaler is None:
-        if args and args.disable_amp:
+        if args and args.disable_amp == 1:
             loss_value, output, loss_scale_value, grad_norm = train_full_precision(
                 model, samples, targets, criterion, optimizer,
                 data_iter_step, update_freq, max_norm, model_ema)
