@@ -22,7 +22,7 @@ ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm
 PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
 NUM_WORKERS=0
 
-DISABLE_AMP=0  # Set to 1 to disable automatic mixed precision training
+# DISABLE_AMP=0  # Set to 1 to disable automatic mixed precision training
 
 # --- Define Fold-Specific Paths ---
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
@@ -136,8 +136,9 @@ ${PYTHON} run_class_finetuning.py \
     --early_stopping_patience ${EARLY_STOPPING_PATIENCE} \
     --early_stopping_delta ${EARLY_STOPPING_DELTA} \
     --TTA \
-    --disable_amp ${DISABLE_AMP} \
     --weights 
+    
+    # --disable_amp ${DISABLE_AMP} \
     
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
