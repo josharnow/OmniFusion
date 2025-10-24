@@ -79,7 +79,12 @@ def train_class_batch(model, samples, target, criterion):
     # --- ADD THIS CHECK ---
     # print_tensor_stats(outputs, name="Model Output (logits)")
     # --- END CHECK ---
-    loss = criterion(outputs, target)
+
+    # --- START AMP FIX: Cast logits to float32 before loss calculation ---
+    # This prevents nn.CrossEntropyLoss (which does log_softmax internally) from overflowing when running in AMP (float16)
+    loss = criterion(outputs.float(), target)
+    # --- END AMP FIX ---
+
     # print_tensor_stats(loss, name="Calculated Loss")
     # print(flush=True)
     return loss, outputs
