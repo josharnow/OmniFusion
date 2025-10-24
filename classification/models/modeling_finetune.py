@@ -190,9 +190,7 @@ class Attention(nn.Module):
         if rel_pos_bias is not None:
             attn = attn + rel_pos_bias
         
-        # --- REVERTED THIS FIX (it was incorrect) ---
         attn = attn.softmax(dim=-1)
-
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
@@ -524,18 +522,26 @@ class VisionTransformer(nn.Module):
         else:   # finetune
             if self.fc_norm is not None:    # use mean pooling
                 t = x[:, 1:, :]
-                # --- START FIX: Force LayerNorm (fc_norm) to run in float32 ---
-                # LayerNorm is unstable in float16 and can output Inf/NaN.
-                # This block forces this one operation to float32.
+                # --- START PREVIOUS FIX: Force LayerNorm (fc_norm) to run in float32 ---
                 with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
-                    return self.fc_norm(t.mean(1))
-                # --- END FIX ---
+                    # Ensure the output here is stable float32
+                    x_norm = self.fc_norm(t.mean(1)) 
+                # --- END PREVIOUS FIX ---
+                # Return the stable float32 output
+                return x_norm 
             else:
                 return x[:, 0]
 
     def forward(self, x):
-        x = self.forward_features(x, is_train=False)
-        x = self.head(x)
+        x = self.forward_features(x, is_train=False) # x is output of fc_norm (now guaranteed float32)
+        
+        # --- START FIX: Force Head Layer to float32 ---
+        # Since x is now float32, this autocast ensures the head layer
+        # also runs in float32, preventing Inf gradient calculation.
+        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            x = self.head(x)
+        # --- END FIX ---
+        
         return x
 
 @register_model
