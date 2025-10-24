@@ -230,6 +230,22 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     else:
         print("Automatic Mixed Precision (AMP) is enabled.")
 
+    # --- START: ADD THIS DEBUGGING BLOCK ---
+    # This code will only run once per epoch, when epoch==0
+    if epoch == 0:
+        print("\n!!! EPOCH 0: REGISTERING GRADIENT DEBUG HOOKS !!!\n", flush=True)
+        # This hook will print stats for every gradient tensor as it's computed
+        def check_grad_hook(grad, name):
+            if torch.is_tensor(grad):
+                # We only care about the Inf/NaN, so only print if one is found
+                if torch.isnan(grad).any() or torch.isinf(grad).any():
+                    print_tensor_stats(grad, f"GRADIENT for {name}")
+        
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                param.register_hook(lambda grad, name=name: check_grad_hook(grad, name))
+    # --- END: ADD THIS DEBUGGING BLOCK ---
+
     for data_iter_step, (samples, _, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
