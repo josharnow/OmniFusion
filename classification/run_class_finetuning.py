@@ -1327,9 +1327,30 @@ def main(args, ds_init):
             'val_auc': val_auc_hist
         }
         # Use final_epoch + 1 if loop completed, or final_epoch if it broke early
-        epochs_completed = final_epoch if final_epoch < args.epochs else args.epochs
-        print(f"Plotting curves for {epochs_completed} completed epochs.")
-        plot_training_curves(history, args.output_dir, epochs_completed)
+        # Correction: The number of completed epochs is final_epoch + 1
+        epochs_completed = final_epoch + 1 
+        
+        # --- FIX: Check list lengths against epochs_completed ---
+        # Ensure all history lists match the *shortest* valid metric list length
+        # This handles the case where the error happened mid-epoch or lists are inconsistent
+        valid_lengths = [len(h) for h in history.values() if h] # Get lengths of non-empty lists
+        if not valid_lengths:
+             print("Skipping curve plotting: No metric history was recorded.")
+             epochs_completed = 0
+        else:
+             epochs_completed = min(valid_lengths) # Use the shortest recorded history
+             if not all(len(h) == epochs_completed for h in history.values() if h):
+                  print(f"Warning: History list lengths are inconsistent. Truncating all plots to {epochs_completed} epochs.")
+                  # Truncate lists to the shortest valid length
+                  for key in history:
+                       if history[key]: # Only truncate if list is not empty
+                           history[key] = history[key][:epochs_completed]
+        
+        if epochs_completed > 0:
+             print(f"Plotting curves for {epochs_completed} completed epochs.")
+             plot_training_curves(history, args.output_dir, epochs_completed)
+        # --- END FIX ---
+            
     elif utils.is_main_process():
          print("Skipping curve plotting (no training epochs completed or no output directory).")
     # --- END PLOT CURVES ---
