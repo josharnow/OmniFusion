@@ -120,8 +120,18 @@ def train_full_precision(
     grad_norm = None
     # Parameter update and gradient reset
     if (data_iter_step + 1) % update_freq == 0:
-        if max_norm is not None:
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        
+        # --- START FIX: Default clipping to 1.0 if not set ---
+        # If max_norm is None (i.e., --clip_grad not set), default to 1.0.
+        # If max_norm is 0, it means user explicitly set --clip_grad 0, so disable clipping.
+        clip_value = 1.0 if max_norm is None else max_norm
+        if clip_value == 0:
+            clip_value = None # Disable clipping if user set --clip_grad 0
+        
+        if clip_value is not None:
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+        # --- END FIX ---
+            
         optimizer.step()
         optimizer.zero_grad()
         if model_ema is not None:
@@ -174,9 +184,19 @@ def train_amp(
         # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         loss /= update_freq
-        grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
+        
+        # --- START FIX: Default clipping to 1.0 if not set ---
+        # If max_norm is None (i.e., --clip_grad not set), default to 1.0 to prevent inf grads.
+        # If max_norm is 0, it means user explicitly set --clip_grad 0, so disable clipping.
+        clip_value = 1.0 if max_norm is None else max_norm
+        if clip_value == 0:
+            clip_value = None # Disable clipping if user set --clip_grad 0
+        # --- END FIX ---
+
+        grad_norm = loss_scaler(loss, optimizer, clip_grad=clip_value, # <-- Use fixed clip_value
                                 parameters=model.parameters(), create_graph=is_second_order,
                                 update_grad=(data_iter_step + 1) % update_freq == 0)
+        
         if (data_iter_step + 1) % update_freq == 0:
             optimizer.zero_grad()
             if model_ema is not None:

@@ -51,6 +51,8 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model
 
+CLIP_GRAD=1.0 # Used to prevent NaN when using Automatic Mixed Precision (AMP)
+
 EARLY_STOPPING_PATIENCE=10  # Number of epochs with no improvement after which training will be stopped. To disable early stopping, set to 0.
 EARLY_STOPPING_DELTA=0.001   # Minimum change in the monitored metric to qualify as an improvement
 
@@ -137,6 +139,7 @@ ${PYTHON} run_class_finetuning.py \
     --early_stopping_delta ${EARLY_STOPPING_DELTA} \
     --TTA \
     --disable_amp ${DISABLE_AMP} \
+    --clip_grad ${CLIP_GRAD} \
     --weights 
     
     
