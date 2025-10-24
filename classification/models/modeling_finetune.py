@@ -190,7 +190,14 @@ class Attention(nn.Module):
         if rel_pos_bias is not None:
             attn = attn + rel_pos_bias
         
-        attn = attn.softmax(dim=-1)
+
+        # attn = attn.softmax(dim=-1)
+        # --- START FIX: Cast attn to float32 for stable softmax ---
+        # This prevents the forward pass (and backward pass) from exploding in float16
+        attn = attn.float().softmax(dim=-1).type_as(x)
+        # --- END FIX ---
+
+
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
