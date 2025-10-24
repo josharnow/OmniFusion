@@ -190,13 +190,8 @@ class Attention(nn.Module):
         if rel_pos_bias is not None:
             attn = attn + rel_pos_bias
         
-
-        # attn = attn.softmax(dim=-1)
-        # --- START FIX: Cast attn to float32 for stable softmax ---
-        # This prevents the forward pass (and backward pass) from exploding in float16
-        attn = attn.float().softmax(dim=-1).type_as(x)
-        # --- END FIX ---
-
+        # --- REVERTED THIS FIX (it was incorrect) ---
+        attn = attn.softmax(dim=-1)
 
         attn = self.attn_drop(attn)
 
@@ -529,7 +524,12 @@ class VisionTransformer(nn.Module):
         else:   # finetune
             if self.fc_norm is not None:    # use mean pooling
                 t = x[:, 1:, :]
-                return self.fc_norm(t.mean(1))
+                # --- START FIX: Force LayerNorm (fc_norm) to run in float32 ---
+                # LayerNorm is unstable in float16 and can output Inf/NaN.
+                # This block forces this one operation to float32.
+                with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+                    return self.fc_norm(t.mean(1))
+                # --- END FIX ---
             else:
                 return x[:, 0]
 
