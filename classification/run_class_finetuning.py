@@ -93,7 +93,10 @@ class WeightedLabelSmoothingCrossEntropy(nn.Module):
         self.class_weights = class_weights
 
     def forward(self, x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        logprobs = F.log_softmax(x, dim=-1)
+        # --- START FIX: Cast logits to float32 for stable log_softmax ---
+        # This prevents overflow to Inf when x is in float16
+        logprobs = F.log_softmax(x.float(), dim=-1)
+        # --- END FIX ---
 
         # Handle soft targets (from mixup)
         if target.ndim == 2:
