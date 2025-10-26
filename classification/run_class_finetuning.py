@@ -998,7 +998,9 @@ def main(args, ds_init):
         label_counts_loss = dataset_train.count_label(label_column_loss)
         total_samples_loss = sum(label_counts_loss)
         # Ensure counts are not zero before division
-        class_weights_list = [total_samples_loss / (len(label_counts_loss) * count) if count > 0 else 0 for count in label_counts_loss.values] # Use .values
+        # class_weights_list = [total_samples_loss / (len(label_counts_loss) * count) if count > 0 else 0 for count in label_counts_loss.values] # Use .values
+        # --- FIX: Use square root of inverse frequency to soften extreme weights ---
+        class_weights_list = [(total_samples_loss / (len(label_counts_loss) * count))**0.5 if count > 0 else 0 for count in label_counts_loss.values] # Use .values
         class_weights = torch.tensor(class_weights_list, device=device, dtype=torch.float) # Ensure float
         print("Calculated Class Weights for Loss:", class_weights)
         if torch.any(class_weights <= 0):
