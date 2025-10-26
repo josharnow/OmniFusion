@@ -53,7 +53,7 @@ from typing import Any, Dict
 
 def load_checkpoint(path: str, map_location: str = 'cpu', allow_fallback: bool = True):
     """Load a checkpoint with PyTorch 2.6 safety defaults while allowing trusted fallbacks."""
-    load_kwargs: Dict[str, Any] = {'map_location': map_location}
+    load_kwargs: Dict[str, Any] = {'map_location': map_location, "weights_only": False}
     used_weights_only = False
 
     serialization = getattr(torch, 'serialization', None)
