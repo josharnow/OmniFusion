@@ -139,8 +139,10 @@ ${PYTHON} run_class_finetuning.py \
     --early_stopping_delta ${EARLY_STOPPING_DELTA} \
     --TTA \
     --disable_amp ${DISABLE_AMP} \
-    --clip_grad ${CLIP_GRAD} \
     --weights 
+
+    
+    # --clip_grad ${CLIP_GRAD} \
     
     
 
