@@ -36,6 +36,8 @@ from datasets.derm_data import Uni_Dataset
 from pathlib import Path
 from models.modeling_finetune import *
 
+import numpy.dtypes as np_dtypes
+
 from timm.data.mixup import Mixup
 # from timm.models import create_model # Not used directly, model created based on name
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
@@ -51,6 +53,8 @@ from scipy import interpolate
 from typing import Any, Dict
 
 
+# In classification/run_class_finetuning.py
+
 def load_checkpoint(path: str, map_location: str = 'cpu', allow_fallback: bool = True):
     """Load a checkpoint with PyTorch 2.6 safety defaults while allowing trusted fallbacks."""
     load_kwargs: Dict[str, Any] = {'map_location': map_location}
@@ -61,9 +65,14 @@ def load_checkpoint(path: str, map_location: str = 'cpu', allow_fallback: bool =
         try:
             allowlist = []
             
-            # --- START FIX: Add numpy.dtype as requested by the error log ---
+            # --- START FIX: Add multiple numpy types to allowlist ---
+            # Add numpy.dtype (from original error)
             if hasattr(np, 'dtype'):
                 allowlist.append(np.dtype)
+            
+            # Add Float64DType (from new error)
+            if hasattr(np_dtypes, 'Float64DType'):
+                allowlist.append(np_dtypes.Float64DType)
             # --- END FIX ---
 
             # Original logic for scalar
@@ -79,7 +88,7 @@ def load_checkpoint(path: str, map_location: str = 'cpu', allow_fallback: bool =
             load_kwargs['weights_only'] = True
             used_weights_only = True
         except Exception as safe_err:
-            print(f"Warning: Failed to register safe globals for numpy scalar when loading {path}: {safe_err}")
+            print(f"Warning: Failed to register safe globals when loading {path}: {safe_err}")
 
     try:
         return torch.load(path, **load_kwargs)
