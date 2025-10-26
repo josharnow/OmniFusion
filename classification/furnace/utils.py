@@ -527,39 +527,90 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, mo
 # In classification/furnace/utils.py
 
 def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, model_ema=None):
-    if args.output_dir:
-        if args.auto_resume and os.path.exists(os.path.join(args.output_dir, 'checkpoint.pth')):
-            args.resume = os.path.join(args.output_dir, 'checkpoint.pth')
-            
+    output_dir = Path(args.output_dir)
+    if loss_scaler is not None:
+        # torch.amp
+        if args.auto_resume and len(args.resume) == 0:
+            import glob
+            all_checkpoints = glob.glob(os.path.join(output_dir, 'checkpoint-*.pth'))
+            latest_ckpt = -1
+            for ckpt in all_checkpoints:
+                t = ckpt.split('-')[-1].split('.')[0]
+                if t.isdigit():
+                    latest_ckpt = max(int(t), latest_ckpt)
+            if latest_ckpt >= 0:
+                args.resume = os.path.join(output_dir, 'checkpoint-%d.pth' % latest_ckpt)
+            print("Auto resume checkpoint: %s" % args.resume)
+
         if args.resume:
             if args.resume.startswith('https'):
                 checkpoint = torch.hub.load_state_dict_from_url(
                     args.resume, map_location='cpu', check_hash=True)
             else:
-                print("Loading checkpoint from %s" % args.resume)
-                # --- START FIX: Add weights_only=False ---
+                # --- START FIX ---
+                # Add weights_only=False to bypass the new PyTorch 2.6 default error
+                print(f"Loading checkpoint from {args.resume} with weights_only=False...")
                 checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
                 # --- END FIX ---
-                
-            if 'model' in checkpoint:
-                msg = model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
-                print(msg)
-            else:
-                msg = model_without_ddp.load_state_dict(checkpoint, strict=False)
-                print(msg)
+                print(f"Resume model checkpoint from: {args.resume}")
             
-            print("Resume checkpoint %s" % args.resume)
+            # handle ema model
+            need_state_dict = model_without_ddp.state_dict()
+            need_ema = False
+            for key in need_state_dict.keys():
+                if 'teacher' in key:
+                    need_ema = True
+                    break
+                
+            checkpoint_model = checkpoint['model']
+            # print(checkpoint_model.keys())
+
+            if need_ema:
+
+                all_keys = list(checkpoint_model.keys())            
+                all_keys = [key for key in all_keys if key.startswith('encoder.')]
+                for key in all_keys:
+                    new_key = key.replace('encoder.','teacher.')
+                    checkpoint_model[new_key] = checkpoint_model[key]
+            
+            """Initialize decoder and delte head and bias weights"""
+            for i in model_without_ddp.state_dict():
+                if i not in checkpoint['model']:
+                    checkpoint['model'][i] = model_without_ddp.state_dict()[i]
+            unexpected_keys = ["head.weight", "head.bias", "fc_norm.weight", "fc_norm.bias"]
+            for key in unexpected_keys:
+                if key in checkpoint['model']:
+                    del checkpoint['model'][key]
+
+            model_without_ddp.load_state_dict(checkpoint_model)
+
+
             if 'optimizer' in checkpoint and 'epoch' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 args.start_epoch = checkpoint['epoch'] + 1
+                if hasattr(args, 'model_ema') and args.model_ema:
+                    _load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
                 if 'scaler' in checkpoint:
                     loss_scaler.load_state_dict(checkpoint['scaler'])
-                if args.model_ema:
-                    if 'model_ema' in checkpoint:
-                        model_ema.ema.load_state_dict(checkpoint['model_ema'])
-                    else:
-                        model_ema.ema.load_state_dict(checkpoint['model'])
                 print("With optim & sched!")
+    else:
+        # deepspeed, only support '--auto_resume'.
+        if args.auto_resume:
+            import glob
+            all_checkpoints = glob.glob(os.path.join(output_dir, 'checkpoint-*'))
+            latest_ckpt = -1
+            for ckpt in all_checkpoints:
+                t = ckpt.split('-')[-1].split('.')[0]
+                if t.isdigit():
+                    latest_ckpt = max(int(t), latest_ckpt)
+            if latest_ckpt >= 0:
+                args.resume = os.path.join(output_dir, 'checkpoint-%d' % latest_ckpt)
+                print("Auto resume checkpoint: %d" % latest_ckpt)
+                _, client_states = model.load_checkpoint(args.output_dir, tag='checkpoint-%d' % latest_ckpt)
+                args.start_epoch = client_states['epoch'] + 1
+                if model_ema is not None:
+                    if args.model_ema:
+                        _load_checkpoint_for_ema(model_ema, client_states['model_ema'])
 
 # import torchsnooper
 # @torchsnooper.snoop()
