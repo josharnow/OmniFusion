@@ -60,12 +60,22 @@ def load_checkpoint(path: str, map_location: str = 'cpu', allow_fallback: bool =
     if serialization is not None and hasattr(serialization, 'add_safe_globals'):
         try:
             allowlist = []
+            
+            # --- START FIX: Add numpy.dtype as requested by the error log ---
+            if hasattr(np, 'dtype'):
+                allowlist.append(np.dtype)
+            # --- END FIX ---
+
+            # Original logic for scalar
             np_multiarray = getattr(np.core, 'multiarray', None)
             scalar_cls = getattr(np_multiarray, 'scalar', None) if np_multiarray is not None else None
             if scalar_cls is not None:
                 allowlist.append(scalar_cls)
+
             if allowlist:
+                print(f"Adding to safe globals: {allowlist}") # Added print for confirmation
                 serialization.add_safe_globals(allowlist)
+            
             load_kwargs['weights_only'] = True
             used_weights_only = True
         except Exception as safe_err:
@@ -682,7 +692,7 @@ def main(args, ds_init):
         print(f"Attempting to load pretrained checkpoint: {args.pretrained_checkpoint}")
         if args.pretrained_checkpoint.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
-                args.pretrained_checkpoint, map_location='cpu', check_hash=True)
+                args.pretrained_checkpoint, map_location='cpu', check_hash=True, weights_only=False)
             checkpoint_model_key = 'model' # Assume default key for URL checkpoints
         else:
             if not os.path.exists(args.pretrained_checkpoint):
