@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-10%1  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 2 concurrent jobs
+#SBATCH --array=1-10%2  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 2 concurrent jobs
 
 
 
@@ -22,23 +22,22 @@ ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm
 PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
 NUM_WORKERS=0
 
-DISABLE_AMP=0  # Set to 1 to disable automatic mixed precision training
-
 # --- Define Fold-Specific Paths ---
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
 # This path construction is crucial for the job array to work correctly.
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}"
 FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data.csv"
 
+CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth"
+
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
-BATCH_SIZE=80             # Smaller batch size for fine-tuning
+BATCH_SIZE=48             # Smaller batch size for fine-tuning
 LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
-EPOCHS=70                 # Start with 10 epochs and increase if needed (README uses 50)
-MIN_LR=1e-6 # Default: 1e-6
+EPOCHS=10                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=0.75          #
 DROP_PATH=0.2             #
 WEIGHT_DECAY=0.05         #
@@ -50,11 +49,6 @@ CUTMIX=0.0                #
 SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model
-
-EARLY_STOPPING_PATIENCE=10  # Number of epochs with no improvement after which training will be stopped. To disable early stopping, set to 0.
-EARLY_STOPPING_DELTA=0.001   # Minimum change in the monitored metric to qualify as an improvement
-
-CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth"
 
 # --- Change to the project root directory ---
 cd ../..
@@ -124,7 +118,6 @@ ${PYTHON} evaluate_only.py \
     --nb_classes ${NB_CLASSES} \
     --num_workers ${NUM_WORKERS} \
     --lr ${LEARNING_RATE} \
-    --min_lr ${MIN_LR} \
     --warmup_epochs ${WARMUP_EPOCHS} \
     --epochs ${EPOCHS} \
     --layer_decay ${LAYER_DECAY} \
@@ -135,14 +128,10 @@ ${PYTHON} evaluate_only.py \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
-    --early_stopping_patience ${EARLY_STOPPING_PATIENCE} \
-    --early_stopping_delta ${EARLY_STOPPING_DELTA} \
     --TTA \
-    --disable_amp ${DISABLE_AMP} \
     --checkpoint_path ${CHECKPOINT_PATH} \
-    --weights 
-    
-    
+    --weights \
+    --disable_amp
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
