@@ -129,7 +129,7 @@ ${PYTHON} run_class_finetuning.py \
     --monitor ${MONITOR} \
     --TTA \
     --weights \
-    --disable_amp
+    --disable_amp\
     --eval # This flag forces evaluation ONLY
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
