@@ -111,7 +111,7 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
+    --pretrained_checkpoint "${CHECKPOINT_PATH}" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -129,9 +129,10 @@ ${PYTHON} run_class_finetuning.py \
     --monitor ${MONITOR} \
     --TTA \
     --weights \
-    --disable_amp\
+    --disable_amp \
     --eval # This flag forces evaluation ONLY
 
+    # --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
 echo "Finished fine-tuning job for Fold ${SLURM_ARRAY_TASK_ID}"
