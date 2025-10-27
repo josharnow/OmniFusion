@@ -81,7 +81,7 @@ def train_class_batch(model, samples, target, criterion):
     # --- END CHECK ---
     loss = criterion(outputs, target)
     # print_tensor_stats(loss, name="Calculated Loss")
-    print(flush=True)
+    # print(flush=True)
     return loss, outputs
 
 

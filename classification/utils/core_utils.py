@@ -277,7 +277,7 @@ def train_loop_clam(epoch, model, loader, optimizer, n_classes, bag_weight, writ
             acc, correct, count = inst_logger.get_summary(i)
             print('class {} clustering acc {}: correct {}/{}'.format(i, acc, correct, count))
 
-    print('Epoch: {}, train_loss: {:.4f}, train_clustering_loss:  {:.4f}, train_error: {:.4f}'.format(epoch, train_loss, train_inst_loss,  train_error))
+    print('Epoch: {}, train_loss: {:.4f}, train_clustering_loss:  {:.4f}, train_error: {:.4f}'.format(epoch, train_loss, train_inst_loss,  train_error), flush=True)
     for i in range(n_classes):
         acc, correct, count = acc_logger.get_summary(i)
         print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))
@@ -322,7 +322,7 @@ def train_loop(epoch, model, loader, optimizer, n_classes, writer = None, loss_f
     train_loss /= len(loader)
     train_error /= len(loader)
 
-    print('Epoch: {}, train_loss: {:.4f}, train_error: {:.4f}'.format(epoch, train_loss, train_error))
+    print('Epoch: {}, train_loss: {:.4f}, train_error: {:.4f}'.format(epoch, train_loss, train_error), flush=True)
     for i in range(n_classes):
         acc, correct, count = acc_logger.get_summary(i)
         print('class {}: acc {}, correct {}/{}'.format(i, acc, correct, count))

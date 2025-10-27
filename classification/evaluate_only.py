@@ -13,7 +13,7 @@ import numpy as np
 # --- Imports from your project ---
 from furnace import utils
 from furnace.datasets import build_dataset
-from furnace.engine_for_finetuning import evaluate
+from furnace.engine_for_finetuning import evaluate, evaluate_tta
 from timm.models import create_model
 
 def get_args():
@@ -271,21 +271,35 @@ def main(args):
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
     
-    # --- Run Evaluation ---
-    print("Starting evaluation phase...")
-    test_stats = evaluate(
-        data_loader=data_loader_test,
-        model=model,
-        device=device,
-        # args=args,
-        # amp=args.use_amp,
-        # model_ema=None,
-        # logger=logger,
-        num_class=args.nb_classes,  # <-- RENAMED from n_classes
-        out_dir=args.output_dir,    # <-- ADDED
-        epoch=0,                    # <-- ADDED (0 for eval-only)
-        mode='Test'                 # <-- ADDED
-    )
+
+    model_weight = args.output_dir + '/' + 'checkpoint-best.pth'
+    model_dict = torch.load(model_weight)
+    model.load_state_dict(model_dict['model'])
+    if args.TTA:
+        print(f"Starting test with tta")
+        test_stats, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch=0,
+                                            mode='test',
+                                            num_class=args.nb_classes)
+    else:
+        print(f"Starting test without tta")
+        test_stats, wandb_test = evaluate(data_loader_test, model, device, args.output_dir, epoch=0, mode='test',
+                                            num_class=args.nb_classes)
+        wandb.log(wandb_test)
+    # # --- Run Evaluation ---
+    # print("Starting evaluation phase...")
+    # test_stats = evaluate(
+    #     data_loader=data_loader_test,
+    #     model=model,
+    #     device=device,
+    #     # args=args,
+    #     # amp=args.use_amp,
+    #     # model_ema=None,
+    #     # logger=logger,
+    #     num_class=args.nb_classes,  # <-- RENAMED from n_classes
+    #     out_dir=args.output_dir,    # <-- ADDED
+    #     epoch=0,                    # <-- ADDED (0 for eval-only)
+    #     mode='Test'                 # <-- ADDED
+    # )
 
     print(f"Accuracy of the network on the {len(dataset_test)} test images: {test_stats['acc1']:.1f}%")
     print(f"Balanced Accuracy (BAcc): {test_stats['BAcc']:.4f}")
