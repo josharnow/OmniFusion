@@ -105,8 +105,7 @@ cd classification
 export MASTER_ADDR=localhost
 export MASTER_PORT=12355 # A random, unused port
 
-# --- Run the Fine-Tuning Script ---
-${PYTHON} evaluate_only.py \
+${PYTHON} run_class_finetuning.py \
     --model ${MODEL} \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
@@ -125,6 +124,7 @@ ${PYTHON} evaluate_only.py \
     --TTA \
     --checkpoint_path "${CHECKPOINT_PATH}" \
     --weights \
+    --eval # This flag forces evaluation ONLY
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
