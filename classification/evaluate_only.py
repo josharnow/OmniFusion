@@ -14,7 +14,7 @@ import numpy as np
 from furnace import utils
 from furnace.datasets import build_dataset
 from furnace.engine_for_finetuning import evaluate
-from models.modeling_finetune import create_model
+from timm.models import create_model
 
 def get_args():
     """

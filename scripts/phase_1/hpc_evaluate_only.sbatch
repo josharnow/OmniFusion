@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=panderm_%a
-#SBATCH --output=../../logs/phase_1/finetune_job_%A_%a.out
-#SBATCH --error=../../logs/phase_1/finetune_job_%A_%a.err
+#SBATCH --output=../../logs/phase_1/evaluate_job_%A_%a.out
+#SBATCH --error=../../logs/phase_1/evaluate_job_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -32,12 +32,12 @@ CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
-BATCH_SIZE=48             # Smaller batch size for fine-tuning
+BATCH_SIZE=64             # Smaller batch size for fine-tuning
 LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
-EPOCHS=10                 # Start with 10 epochs and increase if needed (README uses 50)
+EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=0.75          #
 DROP_PATH=0.2             #
 WEIGHT_DECAY=0.05         #
@@ -108,11 +108,8 @@ export MASTER_PORT=12355 # A random, unused port
 # --- Run the Fine-Tuning Script ---
 ${PYTHON} evaluate_only.py \
     --model ${MODEL} \
-    --csv_path "${FOLD_CSV_PATH}" \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
-    --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -123,15 +120,11 @@ ${PYTHON} evaluate_only.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
-    --reprob ${REPROB} \
     --monitor ${MONITOR} \
     --TTA \
     --checkpoint_path ${CHECKPOINT_PATH} \
     --weights \
-    --disable_amp
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
