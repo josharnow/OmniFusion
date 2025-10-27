@@ -195,9 +195,11 @@ def main(args):
     cudnn.benchmark = True
 
     # --- Build Test Dataset ---
-    dataset_test = build_dataset(is_train=False, args=args, test_set=True)
+    # --- CORRECTED LINE: Removed 'test_set=True' and unpacking tuple ---
+    dataset_test, args.nb_classes = build_dataset(is_train=False, args=args)
     
     print(f"Built test dataset with {len(dataset_test)} images.")
+    print(f"Number of classes: {args.nb_classes}")
 
     if True:  # args.dist_eval:
         if len(dataset_test) % args.world_size != 0:
@@ -261,11 +263,15 @@ def main(args):
     print("Model loaded with message:", msg)
     
     # --- Setup Logger ---
-    logger = utils.get_logger(
-        logging_file=os.path.join(args.output_dir, f'eval_log_{utils.get_rank()}.txt')
-    )
+    # logger = utils.get_logger(
+    #     logging_file=os.path.join(args.output_dir, f'eval_log_{utils.get_rank()}.txt')
+    # )
+    global_rank = utils.get_rank()
+    if global_rank == 0 and args.log_dir is not None:
+        os.makedirs(args.log_dir, exist_ok=True)
+        log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
     
-    # --- Run Evaluation (FIXED CALL) ---
+    # --- Run Evaluation ---
     print("Starting evaluation phase...")
     test_stats = evaluate(
         data_loader=data_loader_test,

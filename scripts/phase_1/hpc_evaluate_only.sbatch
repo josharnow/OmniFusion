@@ -123,7 +123,7 @@ ${PYTHON} evaluate_only.py \
     --smoothing ${SMOOTHING} \
     --monitor ${MONITOR} \
     --TTA \
-    --checkpoint_path ${CHECKPOINT_PATH} \
+    --checkpoint_path "${CHECKPOINT_PATH}" \
     --weights \
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
