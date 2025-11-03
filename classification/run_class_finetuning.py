@@ -707,7 +707,7 @@ def main(args, ds_init):
     elif args.eval:
         epoch=0
         model_weight = args.resume
-        model_dict = torch.load(model_weight)
+        model_dict = torch.load(model_weight, weights_only=False)
         model.load_state_dict(model_dict['model'])
         if args.TTA:
             print(f"Starting evaluation with tta")

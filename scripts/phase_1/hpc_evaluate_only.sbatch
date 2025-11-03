@@ -130,7 +130,7 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --weights \
     --disable_amp \
-    --resume ${CHECKPOINT_PATH} \
+    --resume "${CHECKPOINT_PATH}" \
     --eval # This flag forces evaluation ONLY
 
     # --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
