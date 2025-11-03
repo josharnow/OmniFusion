@@ -28,7 +28,7 @@ NUM_WORKERS=0
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}"
 FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data.csv"
 
-CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth"
+CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth" # For evaluation, this is also the "resume" arguments which is necessary to specify the storage location of finetuned model weights
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
@@ -130,6 +130,7 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --weights \
     --disable_amp \
+    --resume ${CHECKPOINT_PATH} \
     --eval # This flag forces evaluation ONLY
 
     # --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
