@@ -479,7 +479,7 @@ def main(args, ds_init):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.pretrained_checkpoint, map_location='cpu', check_hash=True)
         else:
-            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=True)
+            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) # Weights_only changed to fix unpickling error
             checkpoint = {'model': checkpoint_model}
             if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
                 state_dict = checkpoint['state_dict']
