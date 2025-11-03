@@ -297,12 +297,21 @@ def main(args, ds_init):
                  transforms.CenterCrop(args.input_size),
                  transforms.ToTensor(),
                  normalize]
+    
+    # --- ADD THIS ---
+    # Define TTA test transforms: Resize, Crop, ToTensor, but NO normalization
+    # The TTAHandler will apply its own normalization.
+    test_trans_tta = [transforms.Resize(256),
+                      transforms.CenterCrop(args.input_size),
+                      transforms.ToTensor()]
+    # --- END ADD ---
 
     data_transforms = {
         'train': transforms.Compose(train_trans),
         'val': transforms.Compose(val_trans),
         # 'test': transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # uncomment it when you are testing on F17K or Daffodil
-        'test': transforms.Compose([transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
+        # 'test': transforms.Compose([transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
+        'test': transforms.Compose(test_trans_tta) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
     }
 
     if args.nb_classes == 2:
