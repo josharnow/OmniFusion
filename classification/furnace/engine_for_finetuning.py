@@ -632,12 +632,21 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     # print(confusion_matrices)
     probabilities = np.array(logits)
 
+    # Conditionally calculate top-k accuracy
+    top3_acc = 0.0
+    if num_class >= 3:
+        top3_acc = top_k_accuracy_score(all_targets, probabilities, k=3, labels=np.arange(num_class))
+
+    top5_acc = 0.0
+    if num_class >= 5:
+        top5_acc = top_k_accuracy_score(all_targets, probabilities, k=5, labels=np.arange(num_class))
+
     metrics = {
         'balanced_accuracy': balanced_accuracy_score(all_targets, all_preds),
         'accuracy': accuracy_score(all_targets, all_preds),
         # 'auc_roc': roc_auc_score(F.one_hot(torch.tensor(all_targets), num_classes=num_class), np.array([r['probabilities'] for r in results]), multi_class='ovr'),
-        'top3_acc' : top_k_accuracy_score(all_targets, probabilities, k=3, labels=np.arange(num_class)),
-        'top5_acc' : top_k_accuracy_score(all_targets, probabilities, k=5, labels=np.arange(num_class)),
+        'top3_acc' : top3_acc,
+        'top5_acc' : top5_acc,
         'sensitivity': macro_sensitivity,
         'specificity': macro_specificity,
         'weighted_f1': f1_score(all_targets, all_preds, average='weighted'),

@@ -32,7 +32,7 @@ CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
-BATCH_SIZE=192             # This can be substantially higher than training since no backpropagation is needed
+BATCH_SIZE=384             # This can be substantially higher than training since no backpropagation is needed
 LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
