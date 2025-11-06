@@ -51,6 +51,8 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model
 
+DROPOUT_RATE=0.3          # Adding dropout for fine-tuning to reduce overfitting
+
 # --- Change to the project root directory ---
 cd ../..
 
@@ -131,6 +133,7 @@ ${PYTHON} run_class_finetuning.py \
     --monitor ${MONITOR} \
     --TTA \
     --weights \
+    --drop ${DROPOUT_RATE} \
     --disable_amp
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
