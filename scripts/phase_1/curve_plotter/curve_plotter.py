@@ -8,8 +8,7 @@ import numpy as np
 import os
 
 # --- Configuration ---
-# Assumes your log files are in a folder named "logs"
-# in the same directory as this script.
+# Assumes log files are in a folder named "logs" in the same directory as this script.
 LOG_DIR = "logs/phase_1" 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 
@@ -186,6 +185,4 @@ def main():
         print("No data was extracted. Exiting.")
 
 if __name__ == "__main__":
-    # Note: This script requires the 'pandas' and 'matplotlib' libraries
-    # You can install them with: pip install pandas matplotlib
     main()
