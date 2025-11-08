@@ -691,9 +691,9 @@ def main(args, ds_init):
         # MODIFICATION: Calculate class weights and apply them to the loss function
         label_counts = dataset_train.count_label("binary_label" if binary else "label")
         total_samples = sum(label_counts)
-        # class_weights_list = [(total_samples / (len(label_counts) * count)) for count in label_counts]
+        class_weights_list = [(total_samples / (len(label_counts) * count)) for count in label_counts]
         # --- FIX: Use square root of inverse frequency to soften extreme weights ---
-        class_weights_list = [(total_samples / (len(label_counts) * count))**0.5 for count in label_counts]
+        # class_weights_list = [(total_samples / (len(label_counts) * count))**0.5 for count in label_counts]
         class_weights = torch.tensor(class_weights_list, device=device)
         # print("Using Class Weights for Loss:", class_weights)
 
