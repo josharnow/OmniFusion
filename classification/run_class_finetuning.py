@@ -669,13 +669,19 @@ def main(args, ds_init):
         if args.distributed:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model_without_ddp = model.module
-
-        optimizer = create_optimizer(
-            args, model_without_ddp, skip_list=skip_weight_decay_list,
-            get_num_layer=assigner.get_layer_id if assigner is not None else None,
-            get_layer_scale=assigner.get_scale if assigner is not None else None)
-        loss_scaler = NativeScaler()
-
+        
+        # --- MODIFICATION: Optimizer and Loss Scaler are only created if NOT in --eval mode ---
+        if not args.eval:
+            optimizer = create_optimizer(
+                args, model_without_ddp, skip_list=skip_weight_decay_list,
+                get_num_layer=assigner.get_layer_id if assigner is not None else None,
+                get_layer_scale=assigner.get_scale if assigner is not None else None)
+            loss_scaler = NativeScaler()
+        else:
+            optimizer = None
+            loss_scaler = None
+    
+    # --- This block only runs if we are in TRAINING mode ---
     if not args.eval:
         print("Use step level LR scheduler!")
 
@@ -740,24 +746,56 @@ def main(args, ds_init):
             mode='val_tune', num_class=args.nb_classes, decision_threshold=None
         )
 
-        # --- (UNIFIED) STEP 2: Calculate best threshold (maximizing F1) ---
+        # --- (UNIFIED) STEP 2: Calculate best threshold (Targeting a Specific Recall) ---
+        TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+        print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
+        
         val_probs_positive = val_probs[:, 1]
         precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
-        # Calculate F1 scores and add epsilon to avoid division by zero
-        f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
-        best_threshold = thresholds[np.argmax(f1_scores)]
-        print(f"Best threshold (max F1 on val set): {best_threshold:.4f}")
+
+        try:
+            # Find the last index where recall is >= your target
+            # (The arrays are sorted by recall, descending, so [0] is highest recall)
+            # We find the *last* index ([0][-1]) which has the highest precision 
+            # *while still meeting* our recall target.
+            target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
+            best_threshold = thresholds[target_recall_index]
+            
+            print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
+            print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
+            print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+
+        except IndexError:
+            # Fallback if target recall is never achieved
+            print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
+            f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+            best_threshold = thresholds[np.argmax(f1_scores)]
+
+        print(f"Using threshold: {best_threshold:.4f}")
+        
+        # --- +++ ADDED THIS MEMORY CLEANUP +++ ---
+        # --- This is the key fix for the args.eval path ---
+        print("Clearing validation probability arrays...")
+        try:
+            del val_probs
+            del val_labels
+            del precisions
+            del recalls
+            del thresholds
+        except Exception as e:
+            print(f"Could not delete val arrays: {e}")
+            
+        torch.cuda.empty_cache() # Clear cache before final test run
+        # --- +++ END MEMORY CLEANUP +++ ---
 
         # --- (UNIFIED) STEP 3: Run on TEST set using the tuned threshold ---
         if args.TTA:
             print(f"Starting TEST evaluation with TTA (using threshold={best_threshold:.4f})")
-            # evaluate_tta now returns metrics, None, all_logits_np, all_targets_np
             test_stats, _, _, _ = evaluate_tta(
                 data_loader_test, model, device, args.output_dir, epoch,
                 mode='test', num_class=args.nb_classes,
                 decision_threshold=best_threshold # <-- Pass tuned threshold
             )
-            # Note: evaluate_tta doesn't return wandb_res, so we can't log it
         else:
             print(f"Starting TEST evaluation without TTA (using threshold={best_threshold:.4f})")
             test_stats, wandb_test, _, _ = evaluate(
@@ -765,7 +803,6 @@ def main(args, ds_init):
                 mode='test', num_class=args.nb_classes,
                 decision_threshold=best_threshold # <-- Pass tuned threshold
             )
-            # We can log this since wandb_res is returned
             print("Logging final test metrics (with tuned threshold) to wandb...")
             wandb.log(wandb_test)
         
@@ -774,8 +811,11 @@ def main(args, ds_init):
     # --- +++ END CORRECTED BLOCK +++ ---
     
     else:
-        print(args.eval)
+        # This else should not be reachable if logic is correct
+        print("Error: --eval flag was not processed correctly.")
+        exit(1)
 
+    # --- This block only runs if we are in TRAINING mode ---
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
@@ -804,7 +844,6 @@ def main(args, ds_init):
             num_class=args.nb_classes, decision_threshold=None # Use default threshold for epoch-to-epoch saving
         )
         print('--------------------------',wandb_res)
-        # val_bacc, val_auc_roc, valwf1,val_sen,val_spec = wandb_res['Val Balanced Accuracy'], wandb_res['Val AUC-ROC'], wandb_res['Val F1'],wandb_res['Val Sensitivity'],wandb_res['Val Specificity']
         val_bacc, val_acc, val_auc_roc, valwf1, val_mean_recall = wandb_res['Val BAcc'], wandb_res['Val Acc'] , wandb_res['Val ROC'], \
             wandb_res['Val W_F1'], wandb_res['Val Recall_macro']
         wandb.log(wandb_res)
@@ -835,39 +874,43 @@ def main(args, ds_init):
                         loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
             print(f'Max val mean recall: {max_performance:.2f}%')
 
-        # --- +++ MODIFIED FINAL EVALUATION BLOCK +++ ---
+        # --- +++ MODIFIED FINAL EVALUATION BLOCK (WITH MEMORY CLEANUP) +++ ---
         if epoch == (args.epochs - 1):
             print("\n--- FINAL EVALUATION ---")
+            
+            # --- STEP 1: Free all unnecessary training memory ---
+            # The optimizer and loss_scaler are the biggest memory hogs
+            print("Clearing training tensors (optimizer, loss_scaler) from GPU memory...")
+            try:
+                del optimizer
+                del loss_scaler
+            except Exception as e:
+                print(f"Could not delete optimizer/loss_scaler: {e}")
+
+            # Clear the CUDA cache to free up fragmented memory
+            torch.cuda.empty_cache()
+
+            print("Loading best checkpoint (checkpoint-best.pth)...")
             model_weight = args.output_dir + '/' + 'checkpoint-best.pth'
             model_dict = torch.load(model_weight, map_location=device, weights_only=False)
             model.load_state_dict(model_dict['model'])
 
-            # --- STEP 1: Get probabilities from VAL set to find threshold ---
+            # --- STEP 2: Get probabilities from VAL set to find threshold ---
             print("Running on validation set to find best threshold...")
-            # We don't care about the metrics here, just the probs and labels
-            # Pass threshold=None to use default behavior
             _, _, val_probs, val_labels = evaluate(
                 data_loader_val, model, device, args.output_dir, epoch, 
                 mode='val_tune', num_class=args.nb_classes, decision_threshold=None
             )
 
-            # --- STEP 2: Calculate best threshold (maximizing F1) ---
-            # NOTE - F1 calculation isn't a good method for highly imbalanced datasets
-            # val_probs_positive = val_probs[:, 1]
-            # precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
-            # f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
-            # best_threshold = thresholds[np.argmax(f1_scores)]
-            # print(f"Best threshold (max F1 on val set): {best_threshold:.4f}")
+            # --- STEP 3: Calculate best threshold (Targeting a Specific Recall) ---
+            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+            print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
             
-            # --- STEP 2: Calculate best threshold (Targeting a specific Recall) ---
-            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% sensitivity
-
             val_probs_positive = val_probs[:, 1]
             precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
 
             try:
-                # Find the first index where recall is >= your target
-                # (The arrays are sorted by recall, descending)
+                # Find the last index where recall is >= your target
                 target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
                 best_threshold = thresholds[target_recall_index]
                 
@@ -876,15 +919,27 @@ def main(args, ds_init):
                 print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
 
             except IndexError:
-                # Fallback if 90% recall is never achieved
-                print(f"Could not achieve {TARGET_RECALL*100}% recall.")
-                print("Defaulting to max F1-score (which may be problematic).")
+                # Fallback if target recall is never achieved
+                print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
                 f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
                 best_threshold = thresholds[np.argmax(f1_scores)]
 
             print(f"Using threshold: {best_threshold:.4f}")
 
-            # --- STEP 3: Run on TEST set using the tuned threshold ---
+            # --- STEP 4: Free the validation arrays from memory ---
+            print("Clearing validation probability arrays...")
+            try:
+                del val_probs
+                del val_labels
+                del precisions
+                del recalls
+                del thresholds
+            except Exception as e:
+                print(f"Could not delete val arrays: {e}")
+            
+            torch.cuda.empty_cache() # Clear cache again before final test run
+
+            # --- STEP 5: Run on TEST set using the tuned threshold ---
             if args.TTA:
                 print(f"Starting test with TTA (using threshold={best_threshold:.4f})")
                 test_stats, _, _, _ = evaluate_tta(
@@ -892,7 +947,6 @@ def main(args, ds_init):
                     mode='test', num_class=args.nb_classes,
                     decision_threshold=best_threshold # <-- Pass tuned threshold
                 )
-                # Note: evaluate_tta doesn't return wandb_res, so we can't log it
             else:
                 print(f"Starting test without TTA (using threshold={best_threshold:.4f})")
                 test_stats, wandb_test, _, _ = evaluate(
