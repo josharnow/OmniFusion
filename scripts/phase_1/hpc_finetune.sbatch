@@ -134,7 +134,8 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --weights \
     --drop ${DROPOUT_RATE} \
-    --sq_root_loss
+    --sq_root_loss \
+    --clip_grad 1.0 \
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
