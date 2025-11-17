@@ -47,6 +47,7 @@ import torch.nn.functional as F
 from torch import nn
 import furnace.utils as utils
 from scipy import interpolate
+from sklearn.metrics import precision_recall_curve # <--- +++ ADDED THIS IMPORT
 
 def get_args():
     parser = argparse.ArgumentParser('fine-tuning and evaluation script for image classification', add_help=False)
@@ -721,22 +722,57 @@ def main(args, ds_init):
             args=args, model=model, model_without_ddp=model_without_ddp,
             optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
 
+    # --- +++ CORRECTED AND UNIFIED args.eval BLOCK +++ ---
     elif args.eval:
         epoch=0
         model_weight = args.resume
-        model_dict = torch.load(model_weight, weights_only=False)
+        model_dict = torch.load(model_weight, map_location=device, weights_only=False)
         model.load_state_dict(model_dict['model'])
-        if args.TTA:
-            print(f"Starting evaluation with tta")
-            test_res, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch, mode='test',
-                                                num_class=args.nb_classes)
-        else:
-            print(f"Starting evaluation without tta")
-            test_res, wandb_res = evaluate(data_loader_test, model, device,args.output_dir, epoch, mode='test',
-                                        num_class=args.nb_classes)
-            print('TTTTTTTTT',test_res)
+        
+        print("\n--- EVALUATION-ONLY MODE WITH THRESHOLD TUNING ---")
+        
+        # --- (UNIFIED) STEP 1: Get probabilities from VAL set to find threshold ---
+        print("Running on validation set to find best threshold (using standard eval)...")
+        # We *always* use the standard (non-TTA) validation loader to find the threshold.
+        # The 'evaluate' function now returns metrics, wandb_res, prediction_array, true_label_decode_array
+        _, _, val_probs, val_labels = evaluate(
+            data_loader_val, model, device, args.output_dir, epoch, 
+            mode='val_tune', num_class=args.nb_classes, decision_threshold=None
+        )
 
+        # --- (UNIFIED) STEP 2: Calculate best threshold (maximizing F1) ---
+        val_probs_positive = val_probs[:, 1]
+        precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
+        # Calculate F1 scores and add epsilon to avoid division by zero
+        f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+        best_threshold = thresholds[np.argmax(f1_scores)]
+        print(f"Best threshold (max F1 on val set): {best_threshold:.4f}")
+
+        # --- (UNIFIED) STEP 3: Run on TEST set using the tuned threshold ---
+        if args.TTA:
+            print(f"Starting TEST evaluation with TTA (using threshold={best_threshold:.4f})")
+            # evaluate_tta now returns metrics, None, all_logits_np, all_targets_np
+            test_stats, _, _, _ = evaluate_tta(
+                data_loader_test, model, device, args.output_dir, epoch,
+                mode='test', num_class=args.nb_classes,
+                decision_threshold=best_threshold # <-- Pass tuned threshold
+            )
+            # Note: evaluate_tta doesn't return wandb_res, so we can't log it
+        else:
+            print(f"Starting TEST evaluation without TTA (using threshold={best_threshold:.4f})")
+            test_stats, wandb_test, _, _ = evaluate(
+                data_loader_test, model, device, args.output_dir, epoch, 
+                mode='test', num_class=args.nb_classes,
+                decision_threshold=best_threshold # <-- Pass tuned threshold
+            )
+            # We can log this since wandb_res is returned
+            print("Logging final test metrics (with tuned threshold) to wandb...")
+            wandb.log(wandb_test)
+        
+        print("Final Tuned Test Metrics:", test_stats)
         exit(0)
+    # --- +++ END CORRECTED BLOCK +++ ---
+    
     else:
         print(args.eval)
 
@@ -762,8 +798,11 @@ def main(args, ds_init):
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
             args=args
         )
-        val_stats, wandb_res = evaluate(data_loader_val, model, device, args.output_dir, epoch, mode='val',
-                                        num_class=args.nb_classes)
+        # Note: evaluate() now returns: metrics, wandb_res, prediction_array, true_label_decode_array
+        val_stats, wandb_res, _, _ = evaluate(
+            data_loader_val, model, device, args.output_dir, epoch, mode='val',
+            num_class=args.nb_classes, decision_threshold=None # Use default threshold for epoch-to-epoch saving
+        )
         print('--------------------------',wandb_res)
         # val_bacc, val_auc_roc, valwf1,val_sen,val_spec = wandb_res['Val Balanced Accuracy'], wandb_res['Val AUC-ROC'], wandb_res['Val F1'],wandb_res['Val Sensitivity'],wandb_res['Val Specificity']
         val_bacc, val_acc, val_auc_roc, valwf1, val_mean_recall = wandb_res['Val BAcc'], wandb_res['Val Acc'] , wandb_res['Val ROC'], \
@@ -796,20 +835,51 @@ def main(args, ds_init):
                         loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
             print(f'Max val mean recall: {max_performance:.2f}%')
 
+        # --- +++ MODIFIED FINAL EVALUATION BLOCK +++ ---
         if epoch == (args.epochs - 1):
+            print("\n--- FINAL EVALUATION ---")
             model_weight = args.output_dir + '/' + 'checkpoint-best.pth'
-            model_dict = torch.load(model_weight)
+            model_dict = torch.load(model_weight, map_location=device, weights_only=False)
             model.load_state_dict(model_dict['model'])
+
+            # --- STEP 1: Get probabilities from VAL set to find threshold ---
+            print("Running on validation set to find best threshold...")
+            # We don't care about the metrics here, just the probs and labels
+            # Pass threshold=None to use default behavior
+            _, _, val_probs, val_labels = evaluate(
+                data_loader_val, model, device, args.output_dir, epoch, 
+                mode='val_tune', num_class=args.nb_classes, decision_threshold=None
+            )
+
+            # --- STEP 2: Calculate best threshold (maximizing F1) ---
+            val_probs_positive = val_probs[:, 1]
+            precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
+            f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+            best_threshold = thresholds[np.argmax(f1_scores)]
+            print(f"Best threshold (max F1 on val set): {best_threshold:.4f}")
+
+            # --- STEP 3: Run on TEST set using the tuned threshold ---
             if args.TTA:
-                print(f"Starting test with tta")
-                test_stats, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch,
-                                                    mode='test',
-                                                    num_class=args.nb_classes)
+                print(f"Starting test with TTA (using threshold={best_threshold:.4f})")
+                test_stats, _, _, _ = evaluate_tta(
+                    data_loader_test, model, device, args.output_dir, epoch,
+                    mode='test', num_class=args.nb_classes,
+                    decision_threshold=best_threshold # <-- Pass tuned threshold
+                )
+                # Note: evaluate_tta doesn't return wandb_res, so we can't log it
             else:
-                print(f"Starting test without tta")
-                test_stats, wandb_test = evaluate(data_loader_test, model, device, args.output_dir, epoch, mode='test',
-                                                  num_class=args.nb_classes)
+                print(f"Starting test without TTA (using threshold={best_threshold:.4f})")
+                test_stats, wandb_test, _, _ = evaluate(
+                    data_loader_test, model, device, args.output_dir, epoch, 
+                    mode='test', num_class=args.nb_classes,
+                    decision_threshold=best_threshold # <-- Pass tuned threshold
+                )
+                print("Logging final test metrics (with tuned threshold) to wandb...")
                 wandb.log(wandb_test)
+            
+            print("Final Tuned Test Metrics:", test_stats)
+        # --- +++ END MODIFIED BLOCK +++ ---
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))

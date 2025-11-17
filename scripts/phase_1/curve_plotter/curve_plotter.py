@@ -117,9 +117,12 @@ def plot_metrics(df, base_output_name, output_dir):
         # Create ticks every 2 epochs, or just 1 if the range is small
         tick_step = 2 if (max(epoch_ticks) - min(epoch_ticks)) > 10 else 1
 
+        # --- MODIFICATION: Changed figure size to accommodate 3 plots ---
+        plt.figure(figsize=(18, 5)) # Was (12, 5)
+
         # Plot 1: Loss Curves
-        plt.figure(figsize=(12, 5))
-        plt.subplot(1, 2, 1)
+        # --- MODIFICATION: Changed subplot from (1, 2, 1) to (1, 3, 1) ---
+        plt.subplot(1, 3, 1)
         plt.plot(df['Epoch'], df['Training Loss'], label='Training Loss', marker='o')
         plt.plot(df['Epoch'], df['Validation Loss'], label='Validation Loss', marker='x')
         plt.title(f'{base_output_name}: Loss')
@@ -131,7 +134,8 @@ def plot_metrics(df, base_output_name, output_dir):
 
         # Plot 2: Accuracy Curves
         # Using Validation BAcc as it's more informative for imbalanced datasets
-        plt.subplot(1, 2, 2)
+        # --- MODIFICATION: Changed subplot from (1, 2, 2) to (1, 3, 2) ---
+        plt.subplot(1, 3, 2)
         plt.plot(df['Epoch'], df['Training Accuracy'], label='Training Accuracy', marker='o')
         plt.plot(df['Epoch'], df['Validation BAcc'], label='Validation Balanced Acc (BAcc)', marker='x')
         plt.title(f'{base_output_name}: Accuracy')
@@ -141,6 +145,18 @@ def plot_metrics(df, base_output_name, output_dir):
         plt.grid(True)
         plt.xticks(np.arange(min(df['Epoch']), max(df['Epoch']) + 1, tick_step))
         
+        # --- NEW PLOT ---
+        # Plot 3: AUC-ROC Curve
+        plt.subplot(1, 3, 3)
+        plt.plot(df['Epoch'], df['Validation ROC'], label='Validation AUC-ROC', marker='s', color='g')
+        plt.title(f'{base_output_name}: AUC-ROC')
+        plt.xlabel('Epoch')
+        plt.ylabel('AUC-ROC')
+        plt.legend()
+        plt.grid(True)
+        plt.xticks(np.arange(min(df['Epoch']), max(df['Epoch']) + 1, tick_step))
+        # --- END NEW PLOT ---
+
         plt.tight_layout()
         
         # Save the combined plot

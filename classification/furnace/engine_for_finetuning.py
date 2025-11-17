@@ -343,7 +343,7 @@ def save_predictions_csv(model, data_loader, device, original_csv_path, output_d
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
+def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decision_threshold=None):
     criterion = torch.nn.CrossEntropyLoss()
     metric_logger = MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -373,29 +373,40 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
             loss = criterion(output, target)
 
         prediction_softmax = nn.Softmax(dim=1)(output)
-        _, prediction_decode = torch.max(prediction_softmax, 1)
+        
+        # --- MODIFICATION: Only collect labels and raw probabilities ---
         _, true_label_decode = torch.max(true_label, 1)
-
-        prediction_decode_list.extend(prediction_decode.cpu().detach().numpy())
+        
         true_label_decode_list.extend(true_label_decode.cpu().detach().numpy())
         true_label_onehot_list.extend(true_label.cpu().detach().numpy())
         prediction_list.extend(prediction_softmax.cpu().detach().numpy())
-
-        # Store results for CSV
-        for filename, true_label, pred, prob in zip(batch[1], true_label_decode, prediction_decode, prediction_softmax):
-            # print('fffffffffffff',filename)
-            results.append({
-                'filename': filename,
-                'true_label': true_label.item(),
-                'predicted_label': pred.item(),
-                'probabilities': prob.cpu().numpy()
-            })
+        # --- END MODIFICATION ---
 
     # Convert lists to numpy arrays
-    true_label_decode_array = np.array(true_label_decode_list)
-    prediction_decode_array = np.array(prediction_decode_list)
+    true_label_decode_array = np.array(true_label_decode_list) # This is y_true
     true_label_onehot_array = np.array(true_label_onehot_list)
-    prediction_array = np.array(prediction_list)
+    prediction_array = np.array(prediction_list) # This is y_prob
+
+    # --- NEW THRESHOLD LOGIC ---
+    if decision_threshold is None:
+        # Default behavior: use argmax (equiv to 0.5 for binary)
+        print(f"[{mode}] Using default argmax (0.5) threshold for metrics.")
+        prediction_decode_array = np.argmax(prediction_array, axis=1)
+    else:
+        # Use the provided threshold for class 1
+        print(f"[{mode}] Using custom threshold {decision_threshold} for metrics.")
+        positive_probs = prediction_array[:, 1] # Get probs for class 1
+        prediction_decode_array = (positive_probs >= decision_threshold).astype(int)
+    # --- END NEW LOGIC ---
+
+    # Store results for CSV (now using the thresholded predictions)
+    for i in range(len(image_names)):
+        results.append({
+            'filename': image_names[i],
+            'true_label': true_label_decode_array[i].item(),
+            'predicted_label': prediction_decode_array[i].item(),
+            'probabilities': prediction_array[i]
+        })
 
     confusion_matrices = multilabel_confusion_matrix(true_label_decode_array, prediction_decode_array)
     
@@ -506,7 +517,9 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
             f'{mode.capitalize()} Recall_weighted': recall1
         }
 
-    return metrics, wandb_res
+    # --- MODIFIED RETURN ---
+    # Return probabilities and labels for tuning
+    return metrics, wandb_res, prediction_array, true_label_decode_array
 
 from torchvision.transforms.functional import to_pil_image, to_tensor
 
@@ -566,7 +579,7 @@ class TTAHandler:
         return torch.stack(augmented_batches, dim=0)
 
 @torch.no_grad()
-def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5):
+def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5, decision_threshold=None):
     model.eval()
     criterion = torch.nn.CrossEntropyLoss()
     metric_logger = MetricLogger(delimiter="  ")
@@ -587,12 +600,27 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
         outputs = model(tta_inputs)  # Reshape for model input
         reshaped_outputs = outputs.reshape(num_TTA, B, -1)
 
-        predictions = torch.mean(reshaped_outputs, dim=0)
+        predictions = torch.mean(reshaped_outputs, dim=0) # <-- These are logits
 
-        _, predicted = torch.max(predictions, 1)
+        # --- NEW THRESHOLD LOGIC ---
         logits.extend(predictions.cpu().numpy())
-        all_preds.extend(predicted.cpu().numpy())
         all_targets.extend(targets.cpu().numpy())
+
+        if decision_threshold is None:
+            # Default behavior: use argmax (equiv to 0.5 for binary)
+            print("TTA: Using default argmax (0.5) threshold.")
+            _, predicted = torch.max(predictions, 1)
+            predicted_np = predicted.cpu().numpy()
+        else:
+            # Use the provided threshold for class 1
+            print(f"TTA: Using custom threshold {decision_threshold}.")
+            # 'predictions' are logits, so apply softmax first
+            positive_probs = torch.softmax(predictions, dim=1)[:, 1]
+            predicted = (positive_probs >= decision_threshold)
+            predicted_np = predicted.cpu().numpy().astype(int)
+        
+        all_preds.extend(predicted_np)
+        # --- END NEW LOGIC ---
 
         probabilities = torch.softmax(predictions, dim=1).cpu().numpy()
         
@@ -600,13 +628,17 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
             results.append({
                 'filename': image_name,
                 'true_label': targets[i].item(),
-                'predicted_label': predicted[i].item(),
+                'predicted_label': predicted_np[i].item(), # <-- Use predicted_np
                 'probabilities': probabilities[i]
             })
 
     # CM
     # cm = confusion_matrix(np.array(all_targets), np.array(all_preds))
-    confusion_matrices = multilabel_confusion_matrix(np.array(all_targets), np.array(all_preds))
+    all_targets_np = np.array(all_targets)
+    all_preds_np = np.array(all_preds)
+    all_logits_np = np.array(logits)
+
+    confusion_matrices = multilabel_confusion_matrix(all_targets_np, all_preds_np)
     sensitivity_list = []
     specificity_list = []
     
@@ -630,28 +662,28 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     
     # print("Confusion Matrix:")
     # print(confusion_matrices)
-    probabilities = np.array(logits)
+    # probabilities = np.array(logits) # This is wrong, logits are not probabilities
 
     # Conditionally calculate top-k accuracy
     top3_acc = 0.0
     if num_class >= 3:
-        top3_acc = top_k_accuracy_score(all_targets, probabilities, k=3, labels=np.arange(num_class))
+        top3_acc = top_k_accuracy_score(all_targets_np, all_logits_np, k=3, labels=np.arange(num_class))
 
     top5_acc = 0.0
     if num_class >= 5:
-        top5_acc = top_k_accuracy_score(all_targets, probabilities, k=5, labels=np.arange(num_class))
+        top5_acc = top_k_accuracy_score(all_targets_np, all_logits_np, k=5, labels=np.arange(num_class))
 
     metrics = {
-        'balanced_accuracy': balanced_accuracy_score(all_targets, all_preds),
-        'accuracy': accuracy_score(all_targets, all_preds),
+        'balanced_accuracy': balanced_accuracy_score(all_targets_np, all_preds_np),
+        'accuracy': accuracy_score(all_targets_np, all_preds_np),
         # 'auc_roc': roc_auc_score(F.one_hot(torch.tensor(all_targets), num_classes=num_class), np.array([r['probabilities'] for r in results]), multi_class='ovr'),
         'top3_acc' : top3_acc,
         'top5_acc' : top5_acc,
         'sensitivity': macro_sensitivity,
         'specificity': macro_specificity,
-        'weighted_f1': f1_score(all_targets, all_preds, average='weighted'),
-        'recall_macro': recall_score(all_targets, all_preds, average='macro'),
-        'recall_weighted': recall_score(all_targets, all_preds, average='weighted'),
+        'weighted_f1': f1_score(all_targets_np, all_preds_np, average='weighted'),
+        'recall_macro': recall_score(all_targets_np, all_preds_np, average='macro'),
+        'recall_weighted': recall_score(all_targets_np, all_preds_np, average='weighted'),
     }
     print(metrics)
 
@@ -675,4 +707,6 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
             writer.writerow(row)
 
     print(f"Predictions for {mode} saved to {output_csv_path}")
-    return metrics, None
+    
+    # --- MODIFIED RETURN ---
+    return metrics, None, all_logits_np, all_targets_np
