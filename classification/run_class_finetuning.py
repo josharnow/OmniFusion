@@ -852,11 +852,37 @@ def main(args, ds_init):
             )
 
             # --- STEP 2: Calculate best threshold (maximizing F1) ---
+            # NOTE - F1 calculation isn't a good method for highly imbalanced datasets
+            # val_probs_positive = val_probs[:, 1]
+            # precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
+            # f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+            # best_threshold = thresholds[np.argmax(f1_scores)]
+            # print(f"Best threshold (max F1 on val set): {best_threshold:.4f}")
+            
+            # --- STEP 2: Calculate best threshold (Targeting a specific Recall) ---
+            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% sensitivity
+
             val_probs_positive = val_probs[:, 1]
             precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
-            f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
-            best_threshold = thresholds[np.argmax(f1_scores)]
-            print(f"Best threshold (max F1 on val set): {best_threshold:.4f}")
+
+            try:
+                # Find the first index where recall is >= your target
+                # (The arrays are sorted by recall, descending)
+                target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
+                best_threshold = thresholds[target_recall_index]
+                
+                print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
+                print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
+                print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+
+            except IndexError:
+                # Fallback if 90% recall is never achieved
+                print(f"Could not achieve {TARGET_RECALL*100}% recall.")
+                print("Defaulting to max F1-score (which may be problematic).")
+                f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+                best_threshold = thresholds[np.argmax(f1_scores)]
+
+            print(f"Using threshold: {best_threshold:.4f}")
 
             # --- STEP 3: Run on TEST set using the tuned threshold ---
             if args.TTA:
