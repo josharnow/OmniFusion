@@ -135,6 +135,7 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --disable_amp \
     --resume "${CHECKPOINT_PATH}" \
+    --tune_threshold \
     --eval # This flag forces evaluation ONLY
 
     # --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \

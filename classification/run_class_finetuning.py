@@ -236,6 +236,9 @@ def get_args():
 
     parser.add_argument('--exp_name', default='', type=str,
                         help='name of exp. it is helpful when save the checkpoint')
+    
+    parser.add_argument('--tune_threshold', action='store_true',
+                        help='Conditionally tune threshold for evaluation')
 
     known_args, _ = parser.parse_known_args()
 
@@ -735,58 +738,60 @@ def main(args, ds_init):
         model_dict = torch.load(model_weight, map_location=device, weights_only=False)
         model.load_state_dict(model_dict['model'])
         
-        print("\n--- EVALUATION-ONLY MODE WITH THRESHOLD TUNING ---")
-        
-        # --- (UNIFIED) STEP 1: Get probabilities from VAL set to find threshold ---
-        print("Running on validation set to find best threshold (using standard eval)...")
-        # We *always* use the standard (non-TTA) validation loader to find the threshold.
-        # The 'evaluate' function now returns metrics, wandb_res, prediction_array, true_label_decode_array
-        _, _, val_probs, val_labels = evaluate(
-            data_loader_val, model, device, args.output_dir, epoch, 
-            mode='val_tune', num_class=args.nb_classes, decision_threshold=None
-        )
-
-        # --- (UNIFIED) STEP 2: Calculate best threshold (Targeting a Specific Recall) ---
-        TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
-        print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
-        
-        val_probs_positive = val_probs[:, 1]
-        precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
-
-        try:
-            # Find the last index where recall is >= your target
-            # (The arrays are sorted by recall, descending, so [0] is highest recall)
-            # We find the *last* index ([0][-1]) which has the highest precision 
-            # *while still meeting* our recall target.
-            target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
-            best_threshold = thresholds[target_recall_index]
+        best_threshold = 0.5  # Default threshold if not tuning
+        if args.tune_threshold:
+            print("\n--- EVALUATION-ONLY MODE WITH THRESHOLD TUNING ---")
             
-            print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
-            print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
-            print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+            # --- (UNIFIED) STEP 1: Get probabilities from VAL set to find threshold ---
+            print("Running on validation set to find best threshold (using standard eval)...")
+            # We *always* use the standard (non-TTA) validation loader to find the threshold.
+            # The 'evaluate' function now returns metrics, wandb_res, prediction_array, true_label_decode_array
+            _, _, val_probs, val_labels = evaluate(
+                data_loader_val, model, device, args.output_dir, epoch, 
+                mode='val_tune', num_class=args.nb_classes, decision_threshold=None
+            )
 
-        except IndexError:
-            # Fallback if target recall is never achieved
-            print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
-            f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
-            best_threshold = thresholds[np.argmax(f1_scores)]
-
-        print(f"Using threshold: {best_threshold:.4f}")
-        
-        # --- +++ ADDED THIS MEMORY CLEANUP +++ ---
-        # --- This is the key fix for the args.eval path ---
-        print("Clearing validation probability arrays...")
-        try:
-            del val_probs
-            del val_labels
-            del precisions
-            del recalls
-            del thresholds
-        except Exception as e:
-            print(f"Could not delete val arrays: {e}")
+            # --- (UNIFIED) STEP 2: Calculate best threshold (Targeting a Specific Recall) ---
+            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+            print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
             
-        torch.cuda.empty_cache() # Clear cache before final test run
-        # --- +++ END MEMORY CLEANUP +++ ---
+            val_probs_positive = val_probs[:, 1]
+            precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
+
+            try:
+                # Find the last index where recall is >= your target
+                # (The arrays are sorted by recall, descending, so [0] is highest recall)
+                # We find the *last* index ([0][-1]) which has the highest precision 
+                # *while still meeting* our recall target.
+                target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
+                best_threshold = thresholds[target_recall_index]
+                
+                print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
+                print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
+                print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+
+            except IndexError:
+                # Fallback if target recall is never achieved
+                print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
+                f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+                best_threshold = thresholds[np.argmax(f1_scores)]
+
+            print(f"Using threshold: {best_threshold:.4f}")
+            
+            # --- +++ ADDED THIS MEMORY CLEANUP +++ ---
+            # --- This is the key fix for the args.eval path ---
+            print("Clearing validation probability arrays...")
+            try:
+                del val_probs
+                del val_labels
+                del precisions
+                del recalls
+                del thresholds
+            except Exception as e:
+                print(f"Could not delete val arrays: {e}")
+                
+            torch.cuda.empty_cache() # Clear cache before final test run
+            # --- +++ END MEMORY CLEANUP +++ ---
 
         # --- (UNIFIED) STEP 3: Run on TEST set using the tuned threshold ---
         if args.TTA:
@@ -895,49 +900,51 @@ def main(args, ds_init):
             model_dict = torch.load(model_weight, map_location=device, weights_only=False)
             model.load_state_dict(model_dict['model'])
 
-            # --- STEP 2: Get probabilities from VAL set to find threshold ---
-            print("Running on validation set to find best threshold...")
-            _, _, val_probs, val_labels = evaluate(
-                data_loader_val, model, device, args.output_dir, epoch, 
-                mode='val_tune', num_class=args.nb_classes, decision_threshold=None
-            )
+            best_threshold = 0.5  # Default threshold if not tuning
+            if args.tune_threshold:
+                # --- STEP 2: Get probabilities from VAL set to find threshold ---
+                print("Running on validation set to find best threshold...")
+                _, _, val_probs, val_labels = evaluate(
+                    data_loader_val, model, device, args.output_dir, epoch, 
+                    mode='val_tune', num_class=args.nb_classes, decision_threshold=None
+                )
 
-            # --- STEP 3: Calculate best threshold (Targeting a Specific Recall) ---
-            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
-            print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
-            
-            val_probs_positive = val_probs[:, 1]
-            precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
-
-            try:
-                # Find the last index where recall is >= your target
-                target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
-                best_threshold = thresholds[target_recall_index]
+                # --- STEP 3: Calculate best threshold (Targeting a Specific Recall) ---
+                TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+                print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
                 
-                print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
-                print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
-                print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+                val_probs_positive = val_probs[:, 1]
+                precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
 
-            except IndexError:
-                # Fallback if target recall is never achieved
-                print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
-                f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
-                best_threshold = thresholds[np.argmax(f1_scores)]
+                try:
+                    # Find the last index where recall is >= your target
+                    target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
+                    best_threshold = thresholds[target_recall_index]
+                    
+                    print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
+                    print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
+                    print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
 
-            print(f"Using threshold: {best_threshold:.4f}")
+                except IndexError:
+                    # Fallback if target recall is never achieved
+                    print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
+                    f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+                    best_threshold = thresholds[np.argmax(f1_scores)]
 
-            # --- STEP 4: Free the validation arrays from memory ---
-            print("Clearing validation probability arrays...")
-            try:
-                del val_probs
-                del val_labels
-                del precisions
-                del recalls
-                del thresholds
-            except Exception as e:
-                print(f"Could not delete val arrays: {e}")
-            
-            torch.cuda.empty_cache() # Clear cache again before final test run
+                print(f"Using threshold: {best_threshold:.4f}")
+
+                # --- STEP 4: Free the validation arrays from memory ---
+                print("Clearing validation probability arrays...")
+                try:
+                    del val_probs
+                    del val_labels
+                    del precisions
+                    del recalls
+                    del thresholds
+                except Exception as e:
+                    print(f"Could not delete val arrays: {e}")
+                
+                torch.cuda.empty_cache() # Clear cache again before final test run
 
             # --- STEP 5: Run on TEST set using the tuned threshold ---
             if args.TTA:
