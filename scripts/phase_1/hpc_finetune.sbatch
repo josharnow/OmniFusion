@@ -49,7 +49,7 @@ CUTMIX=0.0                #
 # CUTMIX=1.0                #
 SMOOTHING=0.0
 REPROB=0.25               #
-MONITOR="recall"     # Metric to monitor for saving best model
+MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
 DROPOUT_RATE=0.3          # Adding dropout for fine-tuning to reduce overfitting
 
@@ -134,6 +134,7 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --weights \
     --drop ${DROPOUT_RATE} \
+    --sq_root_loss \
     --disable_amp
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
