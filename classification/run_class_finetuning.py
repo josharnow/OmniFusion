@@ -242,6 +242,9 @@ def get_args():
     
     parser.add_argument('--sq_root_loss', action='store_true',
                         help='Applies square root to the loss function to stabilize training.')
+    
+    parser.add_argument('--focal_loss', action='store_true',
+                        help='Use Focal Loss instead of Cross Entropy Loss.')
 
     known_args, _ = parser.parse_known_args()
 
@@ -258,6 +261,28 @@ def get_args():
 
     return parser.parse_args(), ds_init
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha # Optional: You can pass your class_weights here
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        # Calculate standard Cross Entropy (element-wise)
+        ce_loss = F.cross_entropy(inputs, targets, weight=self.alpha, reduction='none')
+        pt = torch.exp(-ce_loss) # Get the probability of the true class
+        
+        # Apply the Focal term: (1 - pt)^gamma
+        # If pt is high (easy), (1-pt) is near 0, so loss is crushed.
+        # If pt is low (hard), (1-pt) is near 1, so loss is preserved.
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        return focal_loss
 
 def main(args, ds_init):
 
@@ -707,7 +732,7 @@ def main(args, ds_init):
 
         # Applies a weight cap to avoid extremely high weights, which could destabilize training
         # weight_cap = float('inf') # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
-        weight_cap = 10 # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
+        weight_cap = 2.5 # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
 
         class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
         
@@ -721,6 +746,9 @@ def main(args, ds_init):
             criterion = SoftTargetCrossEntropy()
         elif args.smoothing > 0.:
             criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+        elif args.focal_loss:
+            print("Using Focal Loss with Class Weights:", class_weights)
+            criterion = FocalLoss(gamma=2.0, alpha=class_weights, reduction='mean')
         else:
             # Apply the calculated class weights here
             print("Using Class Weights for Loss:", class_weights)
