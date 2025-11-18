@@ -706,8 +706,8 @@ def main(args, ds_init):
         total_samples = sum(label_counts)
 
         # Applies a weight cap to avoid extremely high weights, which could destabilize training
-        weight_cap = float('inf') # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
-        # weight_cap = 15 # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
+        # weight_cap = float('inf') # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
+        weight_cap = 10 # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
 
         class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
         
