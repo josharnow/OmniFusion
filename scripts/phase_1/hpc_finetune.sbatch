@@ -41,8 +41,8 @@ LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 
 WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=0.75          #
-DROP_PATH=0.2             #
-WEIGHT_DECAY=0.05         #
+DROP_PATH=0.3             #
+WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 MIXUP=0.0                 #
 CUTMIX=0.0                #
@@ -52,7 +52,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.3          # Adding dropout for fine-tuning to reduce overfitting
+DROPOUT_RATE=0.5          # Adding dropout for fine-tuning to reduce overfitting
 
 # --- Change to the project root directory ---
 cd ../..
