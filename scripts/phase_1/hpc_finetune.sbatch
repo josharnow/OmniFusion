@@ -109,7 +109,7 @@ cd classification
 export MASTER_ADDR=localhost
 export MASTER_PORT=12355 # A random, unused port
 
-# --- Run the Fine-Tuning Script ---
+# --- Linear probing warmup ---
 ${PYTHON} run_class_finetuning.py \
     --model ${MODEL} \
     --csv_path "${FOLD_CSV_PATH}" \
@@ -117,6 +117,38 @@ ${PYTHON} run_class_finetuning.py \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
     --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
+    --output_dir "${FOLD_OUTPUT_DIR}" \
+    --log_dir "${FOLD_OUTPUT_DIR}" \
+    --nb_classes ${NB_CLASSES} \
+    --num_workers ${NUM_WORKERS} \
+    --lr ${LEARNING_RATE} \
+    --warmup_epochs ${WARMUP_EPOCHS} \
+    --layer_decay ${LAYER_DECAY} \
+    --drop_path ${DROP_PATH} \
+    --weight_decay ${WEIGHT_DECAY} \
+    --mixup ${MIXUP} \
+    --cutmix ${CUTMIX} \
+    --smoothing ${SMOOTHING} \
+    --reprob ${REPROB} \
+    --monitor ${MONITOR} \
+    --TTA \
+    --weights \
+    --drop ${DROPOUT_RATE} \
+    --sq_root_loss \
+    --clip_grad 1.0 \
+    --epochs 10 \
+    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
+    --enable_linear_eval
+
+
+# --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
+${PYTHON} run_class_finetuning.py \
+    --model ${MODEL} \
+    --csv_path "${FOLD_CSV_PATH}" \
+    --data_path "${FOLD_CSV_PATH}" \
+    --batch_size ${BATCH_SIZE} \
+    --root_path "${ROOT_PATH}" \
+    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-best.pth" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -137,6 +169,8 @@ ${PYTHON} run_class_finetuning.py \
     --drop ${DROPOUT_RATE} \
     --sq_root_loss \
     --clip_grad 1.0 \
+    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
+    --focal_loss
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
