@@ -114,7 +114,7 @@ ${PYTHON} run_class_finetuning.py \
     --model ${MODEL} \
     --csv_path "${FOLD_CSV_PATH}" \
     --data_path "${FOLD_CSV_PATH}" \
-    --batch_size ${BATCH_SIZE} \
+    --batch_size 1024 \
     --root_path "${ROOT_PATH}" \
     --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
     --output_dir "${FOLD_OUTPUT_DIR}" \

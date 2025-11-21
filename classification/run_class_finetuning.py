@@ -643,6 +643,16 @@ def main(args, ds_init):
 
     model.to(device)
 
+    # --- FIX: EXPLICITLY FREEZE BACKBONE FOR LINEAR PROBE ---
+    if args.enable_linear_eval:
+        print("Info: Enabling Linear Eval. Freezing backbone weights...")
+        for name, param in model.named_parameters():
+            if 'head' not in name: # Keep the classifier head unfrozen
+                param.requires_grad = False
+            else:
+                print(f"Keeping {name} unfrozen.")
+    # --------------------------------------------------------
+
     model_ema = None
     if args.model_ema:
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper

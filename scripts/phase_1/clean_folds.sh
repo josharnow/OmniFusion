@@ -9,6 +9,7 @@ for fold_dir in fold_*; do
     echo "Cleaning $fold_dir"
     rm -f "$fold_dir"/*.pth
     rm -f "$fold_dir"/*.gpu*
-    rm -f "$fold_dir"/*.csv
+    rm -f "$fold_dir"/val.csv
+    rm -f "$fold_dir"/test.csv
 done
 echo "Fold cleanup complete."
