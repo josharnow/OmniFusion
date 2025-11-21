@@ -245,6 +245,12 @@ def get_args():
     
     parser.add_argument('--focal_loss', action='store_true',
                         help='Use Focal Loss instead of Cross Entropy Loss.')
+    
+
+    parser.add_argument('--no_class_weights', action='store_true',
+                        help='Disable class weighting.')
+    
+    parser.add_argument('--freeze_backbone', action='store_true', help='Freeze backbone weights for linear probe')
 
     known_args, _ = parser.parse_known_args()
 
@@ -644,7 +650,7 @@ def main(args, ds_init):
     model.to(device)
 
     # --- FIX: EXPLICITLY FREEZE BACKBONE FOR LINEAR PROBE ---
-    if args.enable_linear_eval:
+    if args.freeze_backbone:
         print("Info: Enabling Linear Eval. Freezing backbone weights...")
         for name, param in model.named_parameters():
             if 'head' not in name: # Keep the classifier head unfrozen
@@ -757,13 +763,15 @@ def main(args, ds_init):
         elif args.smoothing > 0.:
             criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
         elif args.focal_loss:
-            print("Using Focal Loss with Class Weights:", class_weights)
-            criterion = FocalLoss(gamma=2.0, alpha=class_weights, reduction='mean')
+            if not args.no_class_weights:
+                print("Using Focal Loss with Class Weights:", class_weights)
+            criterion = FocalLoss(gamma=2.0, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
         else:
             # Apply the calculated class weights here
-            print("Using Class Weights for Loss:", class_weights)
+            if not args.no_class_weights:
+                print("Using Class Weights for Loss:", class_weights)
             # NOTE - This might be the best way to address imbalanced datasets
-            criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            criterion = torch.nn.CrossEntropyLoss(weight=class_weights if not args.no_class_weights else None)
 
 
         print("criterion = %s" % str(criterion))

@@ -138,7 +138,9 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --epochs 10 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
-    --enable_linear_eval
+    --enable_linear_eval \
+    --freeze_backbone \
+    --no_class_weights
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -170,7 +172,9 @@ ${PYTHON} run_class_finetuning.py \
     --sq_root_loss \
     --clip_grad 1.0 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
-    --focal_loss
+    --focal_loss \
+    --enable_linear_eval \
+    --aa 'rand-m9-mstd0.5-inc1'
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
