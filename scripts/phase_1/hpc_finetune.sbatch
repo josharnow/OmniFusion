@@ -121,7 +121,6 @@ ${PYTHON} run_class_finetuning.py \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
     --num_workers ${NUM_WORKERS} \
-    --lr ${LEARNING_RATE} \
     --warmup_epochs ${WARMUP_EPOCHS} \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
@@ -136,6 +135,7 @@ ${PYTHON} run_class_finetuning.py \
     --drop ${DROPOUT_RATE} \
     --sq_root_loss \
     --clip_grad 1.0 \
+    --lr 1e-3 \
     --epochs 10 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
     --enable_linear_eval \
