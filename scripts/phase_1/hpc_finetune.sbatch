@@ -121,7 +121,6 @@ ${PYTHON} run_class_finetuning.py \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
     --num_workers ${NUM_WORKERS} \
-    --warmup_epochs ${WARMUP_EPOCHS} \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
@@ -136,7 +135,8 @@ ${PYTHON} run_class_finetuning.py \
     --sq_root_loss \
     --clip_grad 1.0 \
     --lr 1e-3 \
-    --epochs 10 \
+    --warmup_epochs 2 \
+    --epochs 20 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
     --enable_linear_eval \
     --freeze_backbone \
@@ -172,9 +172,10 @@ ${PYTHON} run_class_finetuning.py \
     --sq_root_loss \
     --clip_grad 1.0 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
+    --aa 'rand-m9-mstd0.5-inc1' \
     --focal_loss \
     --enable_linear_eval \
-    --aa 'rand-m9-mstd0.5-inc1'
+    --no_class_weights
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
