@@ -252,6 +252,10 @@ def get_args():
     
     parser.add_argument('--freeze_backbone', action='store_true', help='Freeze backbone weights for linear probe')
 
+
+    parser.add_argument('--eval_threshold', default=0.5, type=float, help='Freeze backbone weights for linear probe')
+
+
     known_args, _ = parser.parse_known_args()
 
     if known_args.enable_deepspeed:
@@ -787,7 +791,7 @@ def main(args, ds_init):
         model_dict = torch.load(model_weight, map_location=device, weights_only=False)
         model.load_state_dict(model_dict['model'])
         
-        best_threshold = 0.5  # Default threshold if not tuning
+        best_threshold = args.eval_threshold  # Default threshold if not tuning
         if args.tune_threshold:
             print("\n--- EVALUATION-ONLY MODE WITH THRESHOLD TUNING ---")
             
