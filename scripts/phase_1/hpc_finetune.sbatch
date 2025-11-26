@@ -130,17 +130,17 @@ ${PYTHON} run_class_finetuning.py \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
     --TTA \
+    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
     --weights \
     --drop ${DROPOUT_RATE} \
-    --sq_root_loss \
     --clip_grad 1.0 \
     --lr 1e-3 \
     --warmup_epochs 2 \
     --epochs 20 \
-    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
+    --sq_root_loss \
+    --weight_cap 10.0 \
     --enable_linear_eval \
-    --freeze_backbone \
-    --no_class_weights
+    --freeze_backbone
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -150,7 +150,7 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-best.pth" \
+    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-last.pth" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -169,11 +169,11 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --weights \
     --drop ${DROPOUT_RATE} \
-    --sq_root_loss \
     --clip_grad 1.0 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
     --focal_loss \
+    --focal_loss_gamma 4.0 \
     --enable_linear_eval \
     --no_class_weights
 

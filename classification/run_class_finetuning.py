@@ -248,12 +248,16 @@ def get_args():
     
 
     parser.add_argument('--no_class_weights', action='store_true',
-                        help='Disable class weighting.')
+                        help='Disable class alpha weighting.')
     
-    parser.add_argument('--freeze_backbone', action='store_true', help='Freeze backbone weights for linear probe')
+    parser.add_argument('--freeze_backbone', action='store_true', help='Freeze backbone weights for linear probe.')
 
 
-    parser.add_argument('--eval_threshold', default=0.5, type=float, help='Freeze backbone weights for linear probe')
+    parser.add_argument('--eval_threshold', default=0.5, type=float, help='Threshold for binary classification evaluation.')
+
+    parser.add_argument('--focal_loss_gamma', default=2.0, type=float, help='Gamma parameter for Focal Loss.')
+
+    parser.add_argument('--weight_cap', default=float('inf'), type=float, help='Cap for class alpha weights to avoid extreme values.')
 
 
     known_args, _ = parser.parse_known_args()
@@ -752,7 +756,7 @@ def main(args, ds_init):
 
         # Applies a weight cap to avoid extremely high weights, which could destabilize training
         # weight_cap = float('inf') # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
-        weight_cap = 10 # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
+        weight_cap = args.weight_cap # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
 
         class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
         
@@ -769,7 +773,7 @@ def main(args, ds_init):
         elif args.focal_loss:
             if not args.no_class_weights:
                 print("Using Focal Loss with Class Weights:", class_weights)
-            criterion = FocalLoss(gamma=2.0, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
+            criterion = FocalLoss(gamma=args.focal_loss_gamma, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
         else:
             # Apply the calculated class weights here
             if not args.no_class_weights:
@@ -931,6 +935,14 @@ def main(args, ds_init):
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
             print(f'Max val mean recall: {max_performance:.2f}%')
+
+        # --- +++ ADD THIS BLOCK +++ ---
+        # Always save the latest epoch as 'checkpoint-last.pth'
+        if args.output_dir:
+            utils.save_model(
+                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch='last', model_ema=model_ema)
+        # --- +++ END BLOCK +++ ---
 
         # --- +++ MODIFIED FINAL EVALUATION BLOCK (WITH MEMORY CLEANUP) +++ ---
         if epoch == (args.epochs - 1):
