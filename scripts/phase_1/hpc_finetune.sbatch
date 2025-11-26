@@ -134,13 +134,14 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
-    --lr 1e-3 \
+    --lr 1e-2 \
     --warmup_epochs 2 \
     --epochs 20 \
     --sq_root_loss \
-    --weight_cap 10.0 \
     --enable_linear_eval \
-    --freeze_backbone
+    --freeze_backbone \
+    --no_class_weights \
+    --focal_loss
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
