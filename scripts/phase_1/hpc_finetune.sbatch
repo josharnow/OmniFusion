@@ -137,11 +137,11 @@ ${PYTHON} run_class_finetuning.py \
     --lr 1e-2 \
     --warmup_epochs 2 \
     --epochs 20 \
-    --sq_root_loss \
     --enable_linear_eval \
     --freeze_backbone \
-    --no_class_weights \
-    --focal_loss
+    --focal_loss \
+    --custom_majority_alpha 0.25 \
+    --custom_minority_alpha 0.75
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -176,7 +176,8 @@ ${PYTHON} run_class_finetuning.py \
     --focal_loss \
     --focal_loss_gamma 4.0 \
     --enable_linear_eval \
-    --no_class_weights
+    --custom_majority_alpha 0.25 \
+    --custom_minority_alpha 0.75
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
