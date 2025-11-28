@@ -140,8 +140,7 @@ ${PYTHON} run_class_finetuning.py \
     --enable_linear_eval \
     --freeze_backbone \
     --focal_loss \
-    --custom_majority_alpha 0.25 \
-    --custom_minority_alpha 0.75
+    --no_class_weights
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
