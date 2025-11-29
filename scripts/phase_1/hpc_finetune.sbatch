@@ -175,8 +175,7 @@ ${PYTHON} run_class_finetuning.py \
     --focal_loss \
     --focal_loss_gamma 4.0 \
     --enable_linear_eval \
-    --custom_majority_alpha 0.25 \
-    --custom_minority_alpha 0.75
+    --no_class_weights
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 

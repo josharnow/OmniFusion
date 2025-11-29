@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
+#SBATCH --array=1-3%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
 
 
@@ -136,7 +136,7 @@ ${PYTHON} run_class_finetuning.py \
     --disable_amp \
     --resume "${CHECKPOINT_PATH}" \
     --enable_linear_eval \
-    --eval_threshold 0.5 \
+    --tune_threshold \
     --eval # This flag forces evaluation ONLY
 
     # --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
