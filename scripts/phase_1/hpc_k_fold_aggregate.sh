@@ -3,7 +3,7 @@
 PYTHON="python3"
 OUTPUT_DIR="/Users/josh/Software Development/University/Thesis/PanDerm/output/phase_1" # NOTE - Adjust name according to phase of experiment
 N_SPLITS=10
-CSV_FILENAME="PanDerm_Large_LP_result.csv"
+CSV_FILENAME="test_threshold_4.csv"
 
 # --- Change to the project root directory ---
 cd ../..
