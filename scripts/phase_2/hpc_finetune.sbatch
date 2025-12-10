@@ -38,7 +38,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/phase_2.csv"
 # Note: Batch size and LR are adjusted for a single GPU setup
 BATCH_SIZE=80             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
@@ -121,7 +121,6 @@ ${PYTHON} run_class_finetuning.py \
     --monitor ${MONITOR} \
     --TTA \
     --wandb_name "${SLURM_ARRAY_TASK_ID}_Phase2_LP" \
-    --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --lr 1e-2 \
@@ -129,8 +128,7 @@ ${PYTHON} run_class_finetuning.py \
     --epochs 20 \
     --enable_linear_eval \
     --freeze_backbone \
-    --focal_loss \
-    --no_class_weights
+    --focal_loss
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -157,15 +155,13 @@ ${PYTHON} run_class_finetuning.py \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
     --TTA \
-    --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --wandb_name "${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
     --focal_loss \
-    --focal_loss_gamma 4.0 \
-    --enable_linear_eval \
-    --no_class_weights
+    --focal_loss_gamma 2.0 \
+    --enable_linear_eval
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
