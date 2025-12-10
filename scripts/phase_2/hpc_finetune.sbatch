@@ -159,8 +159,6 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --wandb_name "${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
-    --focal_loss \
-    --focal_loss_gamma 2.0 \
     --enable_linear_eval
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
