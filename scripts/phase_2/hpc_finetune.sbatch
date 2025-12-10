@@ -127,8 +127,7 @@ ${PYTHON} run_class_finetuning.py \
     --warmup_epochs 2 \
     --epochs 20 \
     --enable_linear_eval \
-    --freeze_backbone \
-    --focal_loss
+    --freeze_backbone
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
