@@ -38,7 +38,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/phase_2.csv"
 # Note: Batch size and LR are adjusted for a single GPU setup
 BATCH_SIZE=80             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
-LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
