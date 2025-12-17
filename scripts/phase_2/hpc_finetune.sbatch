@@ -42,7 +42,7 @@ LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
-EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
+EPOCHS=40                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=0.75          #
 DROP_PATH=0.3             #
 WEIGHT_DECAY=0.1         #
@@ -124,6 +124,8 @@ ${PYTHON} run_class_finetuning.py \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --lr 1e-2 \
+    --weights \
+    --no_class_weights \
     --warmup_epochs 2 \
     --epochs 20 \
     --enable_linear_eval \
@@ -156,6 +158,8 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
+    --weights \
+    --no_class_weights \
     --wandb_name "${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
     --enable_linear_eval
