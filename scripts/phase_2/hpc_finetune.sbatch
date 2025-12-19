@@ -16,6 +16,7 @@ PYTHON="python3"
 MODEL="PanDerm_Large_FT" # Base model to start fine-tuning from
 NB_CLASSES=2
 OUTPUT_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_2"
+CSV_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_2" # IMPORTANT: Directory containing your fold_data.csv files
 ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/images/"
 # Below is the pretrained checkpoint for the ENTIRE PanDerm dataset (DO NOT USE FOR THESIS)
 # PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
