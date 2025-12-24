@@ -122,7 +122,7 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --lr 1e-2 \
     --warmup_epochs 2 \
-    --epochs 20 \
+    --epochs 10 \
     --enable_linear_eval \
     --freeze_backbone \
     --focal_loss \
