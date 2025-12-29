@@ -126,6 +126,7 @@ ${PYTHON} run_class_finetuning.py \
     --enable_linear_eval \
     --freeze_backbone \
     --focal_loss \
+    --stratify_source \
     --no_class_weights
 
 
@@ -160,7 +161,7 @@ ${PYTHON} run_class_finetuning.py \
     --aa 'rand-m9-mstd0.5-inc1' \
     --focal_loss \
     --focal_loss_gamma 4.0 \
-    --enable_linear_eval \
+    --stratify_source \
     --no_class_weights
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER

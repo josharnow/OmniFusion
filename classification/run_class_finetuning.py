@@ -263,6 +263,10 @@ def get_args():
 
     parser.add_argument('--custom_minority_alpha', default=None, type=float, help='Custom alpha weight for minority class in Focal Loss.')
 
+    # For thesis stage 2
+    parser.add_argument('--stratify_source', action='store_true',
+                        help='Enable stratified sampling by Source (ISIC vs External) AND Label')
+
 
     known_args, _ = parser.parse_known_args()
 
@@ -395,18 +399,55 @@ def main(args, ds_init):
 
     global_rank = utils.get_rank()
     if args.weights:
-        label_counts = dataset_train.count_label("binary_label" if binary else "label")
-        total_samples = sum(label_counts)
-        weights = [total_samples / (len(label_counts) * count) for count in label_counts]
-        weight_dict = dict(zip(label_counts.index, weights))
+        if args.stratify_source:
+            print(">>> Using Source-Stratified Sampling (4 Groups: ISIC/Ext * Benign/Mal) <<<")
+            
+            # 1. Get the training dataframe
+            # We assume dataset_train corresponds to df[df['split'] == 'train']
+            train_df = df[df['split'] == 'train'].copy()
+            
+            # 2. Identify Source (ISIC vs External)
+            # Logic: ISIC images start with 'ISIC_2024', everything else is External
+            train_df['is_isic'] = train_df['image'].astype(str).str.startswith('ISIC_2024')
+            
+            # 3. Identify Label
+            label_col = "binary_label" if binary else "label"
+            
+            # 4. Create 4 Distinct Groups
+            # Group 0: External Benign
+            # Group 1: External Malignant
+            # Group 2: ISIC Benign
+            # Group 3: ISIC Malignant
+            train_df['group'] = 0 # Default (External Benign)
+            train_df.loc[ (~train_df['is_isic']) & (train_df[label_col] == 1), 'group'] = 1
+            train_df.loc[ (train_df['is_isic']) & (train_df[label_col] == 0), 'group'] = 2
+            train_df.loc[ (train_df['is_isic']) & (train_df[label_col] == 1), 'group'] = 3
+            
+            # 5. Calculate Weights so each GROUP has equal probability
+            # (i.e., each of the 4 groups contributes 25% of the batch)
+            group_counts = train_df['group'].value_counts().sort_index()
+            print("Stratified Group Counts:", group_counts.to_dict())
+            
+            # Weight = 1 / count
+            group_weights = 1.0 / group_counts
+            
+            # Map group weights back to each sample
+            sample_weights = torch.tensor(train_df['group'].map(group_weights).values, dtype=torch.double)
+            
+            sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
+        else:
+            label_counts = dataset_train.count_label("binary_label" if binary else "label")
+            total_samples = sum(label_counts)
+            weights = [total_samples / (len(label_counts) * count) for count in label_counts]
+            weight_dict = dict(zip(label_counts.index, weights))
 
-        print('Label distribution:')
-        for label, count in label_counts.items():
-            print(f'Label {label}: {count}')
+            print('Label distribution:')
+            for label, count in label_counts.items():
+                print(f'Label {label}: {count}')
 
-        train_y = df[(df['split'] == 'train')]["binary_label" if binary else "label"].values.tolist()
-        sample_weights = torch.tensor([weight_dict[label] for label in train_y])
-        sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
+            train_y = df[(df['split'] == 'train')]["binary_label" if binary else "label"].values.tolist()
+            sample_weights = torch.tensor([weight_dict[label] for label in train_y])
+            sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
         print("Using WeightedRandomSampler")
     else:
         num_tasks = utils.get_world_size()
