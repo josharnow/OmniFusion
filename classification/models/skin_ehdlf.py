@@ -1,0 +1,132 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import timm
+
+class AdaptiveFeatureFusion(nn.Module):
+    """
+    Adaptive Attention-based Feature Fusion Mechanism as described in SkinEHDLF.
+    It projects features to a common dimension, computes attention weights, 
+    and performs a weighted combination.
+    """
+    def __init__(self, dim_1, dim_2, dim_3, common_dim=512):
+        super().__init__()
+        
+        # Project all features to a common dimension
+        self.proj_1 = nn.Linear(dim_1, common_dim)
+        self.proj_2 = nn.Linear(dim_2, common_dim)
+        self.proj_3 = nn.Linear(dim_3, common_dim)
+        
+        # Attention mechanism
+        # A simple MLP to learn weights for each branch from the concatenated features
+        self.attn_fc = nn.Sequential(
+            nn.Linear(common_dim * 3, 128),
+            nn.ReLU(),
+            nn.Linear(128, 3), # Output 3 weights
+            nn.Softmax(dim=1)
+        )
+        
+        self.layer_norm = nn.LayerNorm(common_dim)
+    
+    # Modify the forward method to be compatible with pipelines that expect features
+    # Part A: Feature Extraction
+    def forward_features(self, x):
+        f_convnext = self.convnext(x)
+        f_efficient = self.efficientnet(x)
+        f_swin = self.swin(x)
+        # This calls the AdaptiveFeatureFusion layer (Snippet 1 logic happens here!)
+        return self.fusion_layer(f_convnext, f_efficient, f_swin)
+
+    # Part B: The Standard Forward Pass
+    def forward(self, x):
+        # NOTE - Below is a modification specifically to allow direct use in pipelines expecting a single input (i.e., to fit the PanDerm pipeline pattern).
+        x = self.forward_features(x) # Get the fused features
+        x = self.classifier(x) # Classify them
+        return x
+        
+        # NOTE - Below is the original fusion logic commented out for clarity.
+        # # x1, x2, x3 are feature vectors (Batch, Dim)
+        
+        # # 1. Projection
+        # f1 = self.proj_1(x1)
+        # f2 = self.proj_2(x2)
+        # f3 = self.proj_3(x3)
+        
+        # # 2. Stack for attention calculation
+        # # Shape: (Batch, Common_Dim * 3)
+        # concat_features = torch.cat([f1, f2, f3], dim=1)
+        
+        # # 3. Compute Attention Weights
+        # # Shape: (Batch, 3)
+        # weights = self.attn_fc(concat_features)
+        
+        # # 4. Weighted Fusion
+        # # Expand weights to (Batch, 1) for broadcasting
+        # w1 = weights[:, 0].unsqueeze(1)
+        # w2 = weights[:, 1].unsqueeze(1)
+        # w3 = weights[:, 2].unsqueeze(1)
+        
+        # fused = (w1 * f1) + (w2 * f2) + (w3 * f3)
+        
+        # return self.layer_norm(fused)
+
+class SkinEHDLF(nn.Module):
+    """
+    Hybrid model combining ConvNeXt, EfficientNetV2, and Swin Transformer
+    with Adaptive Feature Fusion.
+    """
+    def __init__(self, num_classes=2, pretrained=True):
+        super().__init__()
+        
+        # 1. Define Backbones (Feature Extractors) using timm
+        # We set num_classes=0 to get the feature vector (pooling is usually included by default in timm forward_features + pooling, 
+        # or we can grab the representation before the head)
+        
+        # ConvNeXt (e.g., convnext_base)
+        self.convnext = timm.create_model('convnext_base', pretrained=pretrained, num_classes=0)
+        
+        # EfficientNetV2 (e.g., tf_efficientnetv2_m)
+        self.efficientnet = timm.create_model('tf_efficientnetv2_m', pretrained=pretrained, num_classes=0)
+        
+        # Swin Transformer (e.g., swin_base_patch4_window7_224)
+        self.swin = timm.create_model('swin_base_patch4_window7_224', pretrained=pretrained, num_classes=0)
+        
+        # Determine feature dimensions dynamically
+        with torch.no_grad():
+            dummy_input = torch.randn(1, 3, 224, 224)
+            dim1 = self.convnext(dummy_input).shape[1]
+            dim2 = self.efficientnet(dummy_input).shape[1]
+            dim3 = self.swin(dummy_input).shape[1]
+            
+        print(f"Feature Dims - ConvNeXt: {dim1}, EfficientNet: {dim2}, Swin: {dim3}")
+
+        # 2. Fusion Layer
+        self.fusion_dim = 1024 # Size of the fused vector
+        self.fusion_layer = AdaptiveFeatureFusion(dim1, dim2, dim3, common_dim=self.fusion_dim)
+        
+        # 3. Classification Head (Dense Layer + Output)
+        # The SkinEHDLF paper mentions a Dense Layer (1024 units) before the final output
+        self.classifier = nn.Sequential(
+            nn.Linear(self.fusion_dim, 1024),
+            nn.ReLU(),
+            nn.Dropout(0.3), # Dropout rate from paper table 7
+            nn.Linear(1024, num_classes)
+        )
+
+    def forward(self, x):
+        # Extract features
+        f_convnext = self.convnext(x)
+        f_efficient = self.efficientnet(x)
+        f_swin = self.swin(x)
+        
+        # Fuse features
+        f_fused = self.fusion_layer(f_convnext, f_efficient, f_swin)
+        
+        # Classify
+        out = self.classifier(f_fused)
+        
+        return out
+
+# Factory function for builder
+def skin_ehdlf_hybrid(num_classes=2, **kwargs):
+    return SkinEHDLF(num_classes=num_classes, **kwargs)
