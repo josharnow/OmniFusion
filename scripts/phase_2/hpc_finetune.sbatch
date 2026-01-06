@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
+#SBATCH --array=1-1%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
 
 
@@ -110,8 +110,6 @@ ${PYTHON} run_class_finetuning.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
@@ -125,9 +123,11 @@ ${PYTHON} run_class_finetuning.py \
     --epochs 10 \
     --enable_linear_eval \
     --freeze_backbone \
-    --focal_loss \
     --stratify_source \
-    --no_class_weights
+    --no_class_weights 
+    # --focal_loss \
+    # --mixup ${MIXUP} \
+    # --cutmix ${CUTMIX}
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -148,8 +148,6 @@ ${PYTHON} run_class_finetuning.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
@@ -159,10 +157,17 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
-    --focal_loss \
-    --focal_loss_gamma 4.0 \
     --stratify_source \
-    --no_class_weights
+    --no_class_weights \
+    --mixup 0.8 \
+    --cutmix 1.0 \
+    --mixup_prob 1.0 \
+    --mixup_switch_prob 0.5 \
+    --mixup_mode "batch" \
+    # --mixup ${MIXUP} \
+    # --cutmix ${CUTMIX} \
+    # --focal_loss \
+    # --focal_loss_gamma 4.0 \
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
