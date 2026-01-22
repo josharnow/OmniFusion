@@ -717,7 +717,7 @@ def main(args, ds_init):
     if args.freeze_backbone:
         print("Info: Enabling Linear Eval. Freezing backbone weights...")
         for name, param in model.named_parameters():
-            if 'head' not in name: # Keep the classifier head unfrozen
+            if 'head' not in name and 'classifier' not in name and 'fusion_layer' not in name: # Keep the classifier head unfrozen
                 param.requires_grad = False
             else:
                 print(f"Keeping {name} unfrozen.")
