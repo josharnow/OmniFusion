@@ -24,8 +24,9 @@ def parse_log_file(log_file_path):
     val_accs = []
     val_rocs = []
 
-    # Regex to find the averaged training stats
-    train_stats_pattern = re.compile(r"Averaged stats:.*?loss: \d+\.\d+ \((\d+\.\d+)\).*?class_acc: \d+\.\d+ \((\d+\.\d+)\)")
+    # Regex to find the averaged training stats (some logs don't include class_acc)
+    # Capture the averaged loss in parentheses after `loss: X (AVG)`
+    train_stats_pattern = re.compile(r"Averaged stats:.*?loss: \d+\.\d+ \((\d+\.\d+)\)")
     
     # Regex to find the validation stats dictionary
     val_stats_pattern = re.compile(r"-------------------------- (\{.*?\})")
@@ -45,10 +46,11 @@ def parse_log_file(log_file_path):
             if train_match:
                 try:
                     temp_train_loss = float(train_match.group(1))
-                    temp_train_acc = float(train_match.group(2))
                 except (IndexError, ValueError):
                     temp_train_loss = None
-                    temp_train_acc = None
+                # Many logs do not include a training class_acc in the averaged line.
+                # Use NaN for training accuracy so validation rows are still preserved.
+                temp_train_acc = np.nan
 
             # 2. Look for the validation summary line
             val_match = val_stats_pattern.search(line)
@@ -89,7 +91,8 @@ def parse_log_file(log_file_path):
             'Validation ROC': val_rocs
         }
         
-        df = pd.DataFrame(data).dropna() # Drop rows where any data might be missing
+        # Create DataFrame; do not drop NaNs so rows with validation-only metrics are kept
+        df = pd.DataFrame(data)
         df['Epoch'] = df['Epoch'].astype(int)
         
         return df

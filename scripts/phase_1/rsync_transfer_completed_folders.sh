@@ -39,12 +39,42 @@ for fold in $(seq $START_FOLD $END_FOLD); do
     INCLUDE_ARGS+=( --include="fold_${fold}/" --include="fold_${fold}/**" )
 done
 
-# Define the remote path with DOUBLE QUOTES around the directory path
-# This ensures the remote shell handles "MS Thesis" as a single name
-REMOTE_PATH='ja50529n@hpcmaster.seidenberg.pace.edu:"/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_1/"'
+# Prompt user for phase number (e.g., 1 or 2) and validate
+read -p "Enter phase number (e.g., 1 or 2): " PHASE_NUM
+if [ -z "$PHASE_NUM" ]; then
+    echo "No phase number provided. Exiting."
+    exit 1
+fi
 
-# Use rsync with the array expansion
-echo "Starting transfer..."
-rsync -avhP "${INCLUDE_ARGS[@]}" --exclude='checkpoint-last.pth' --exclude='fold_data.csv' --exclude='val.csv' --exclude='*.gpu*' --exclude='*' "$REMOTE_PATH" "$DEST_DIR/"
+# Define the remote path using the selected phase (keeps quoting for spaces)
+REMOTE_PATH="ja50529n@hpcmaster.seidenberg.pace.edu:\"/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_${PHASE_NUM}/\""
+
+# Build a robust set of exclude patterns (cover several path formats)
+EXCLUDE_ARGS=(
+    --exclude='checkpoint-last.pth'
+    --exclude='checkpoint-best.pth'
+    --exclude='*/checkpoint-best.pth'
+    --exclude='**/checkpoint-best.pth'
+    --exclude='**/checkpoint-last.pth'
+    --exclude='**/fold_data.csv'
+    --exclude='**/val.csv'
+    --exclude='**/*.gpu*'
+)
+
+# First run a dry-run to show what would be transferred
+echo "Running rsync dry-run to show files that would be transferred..."
+# IMPORTANT: pass exclude patterns BEFORE include patterns because rsync
+# evaluates patterns left-to-right and the first matching rule wins.
+rsync -avhnP "${EXCLUDE_ARGS[@]}" "${INCLUDE_ARGS[@]}" --exclude='*' "$REMOTE_PATH" "$DEST_DIR/"
+
+read -p "Proceed with actual transfer? (y/N): " PROCEED
+if [ "$PROCEED" != "y" ] && [ "$PROCEED" != "Y" ]; then
+        echo "Aborted by user. No files were transferred."
+        exit 0
+fi
+
+echo "Starting real transfer..."
+# Pass excludes before includes so excludes override included-directory matches
+rsync -avhP "${EXCLUDE_ARGS[@]}" "${INCLUDE_ARGS[@]}" --exclude='*' "$REMOTE_PATH" "$DEST_DIR/"
 
 echo "Transfer of fold_${START_FOLD} to fold_${END_FOLD} to $DEST_DIR completed."
