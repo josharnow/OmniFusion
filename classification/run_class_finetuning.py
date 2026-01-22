@@ -48,6 +48,7 @@ from torch import nn
 import furnace.utils as utils
 from scipy import interpolate
 from sklearn.metrics import precision_recall_curve # <--- +++ ADDED THIS IMPORT
+from models.skin_ehdlf import skin_ehdlf_hybrid
 
 def get_args():
     parser = argparse.ArgumentParser('fine-tuning and evaluation script for image classification', add_help=False)
@@ -527,6 +528,16 @@ def main(args, ds_init):
             lin_probe=args.enable_linear_eval)
         print(model)
         patch_size = model.patch_embed.patch_size
+    elif args.model == 'SkinEHDLF_Hybrid':
+        print(f"Creating SkinEHDLF_Hybrid model with {args.nb_classes} classes...")
+        model = skin_ehdlf_hybrid(
+            num_classes=args.nb_classes,
+            pretrained=True  # Assuming you want pretrained backbones
+        )
+        print(model)
+        # SkinEHDLF is a hybrid (ConvNext/EffNet/Swin) and does not have a single 'patch_embed'.
+        # We set a dummy patch_size to prevent the script from crashing in the next lines.
+        patch_size = (16, 16)
 
 
     elif args.model=='PanDerm_Base_FT':

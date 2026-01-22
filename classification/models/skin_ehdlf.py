@@ -28,47 +28,27 @@ class AdaptiveFeatureFusion(nn.Module):
         
         self.layer_norm = nn.LayerNorm(common_dim)
     
-    # Modify the forward method to be compatible with pipelines that expect features
-    # Part A: Feature Extraction
-    def forward_features(self, x):
-        f_convnext = self.convnext(x)
-        f_efficient = self.efficientnet(x)
-        f_swin = self.swin(x)
-        # This calls the AdaptiveFeatureFusion layer (Snippet 1 logic happens here!)
-        return self.fusion_layer(f_convnext, f_efficient, f_swin)
-
-    # Part B: The Standard Forward Pass
-    def forward(self, x):
-        # NOTE - Below is a modification specifically to allow direct use in pipelines expecting a single input (i.e., to fit the PanDerm pipeline pattern).
-        x = self.forward_features(x) # Get the fused features
-        x = self.classifier(x) # Classify them
-        return x
+    # --- Accept 3 inputs, Fuse them, Return 1 output ---
+    def forward(self, x1, x2, x3):
+        # 1. Projection
+        f1 = self.proj_1(x1)
+        f2 = self.proj_2(x2)
+        f3 = self.proj_3(x3)
         
-        # NOTE - Below is the original fusion logic commented out for clarity.
-        # # x1, x2, x3 are feature vectors (Batch, Dim)
+        # 2. Stack
+        concat_features = torch.cat([f1, f2, f3], dim=1)
         
-        # # 1. Projection
-        # f1 = self.proj_1(x1)
-        # f2 = self.proj_2(x2)
-        # f3 = self.proj_3(x3)
+        # 3. Attention
+        weights = self.attn_fc(concat_features)
         
-        # # 2. Stack for attention calculation
-        # # Shape: (Batch, Common_Dim * 3)
-        # concat_features = torch.cat([f1, f2, f3], dim=1)
+        # 4. Fusion
+        w1 = weights[:, 0].unsqueeze(1)
+        w2 = weights[:, 1].unsqueeze(1)
+        w3 = weights[:, 2].unsqueeze(1)
         
-        # # 3. Compute Attention Weights
-        # # Shape: (Batch, 3)
-        # weights = self.attn_fc(concat_features)
+        fused = (w1 * f1) + (w2 * f2) + (w3 * f3)
         
-        # # 4. Weighted Fusion
-        # # Expand weights to (Batch, 1) for broadcasting
-        # w1 = weights[:, 0].unsqueeze(1)
-        # w2 = weights[:, 1].unsqueeze(1)
-        # w3 = weights[:, 2].unsqueeze(1)
-        
-        # fused = (w1 * f1) + (w2 * f2) + (w3 * f3)
-        
-        # return self.layer_norm(fused)
+        return self.layer_norm(fused)
 
 class SkinEHDLF(nn.Module):
     """
@@ -112,20 +92,22 @@ class SkinEHDLF(nn.Module):
             nn.Dropout(0.3), # Dropout rate from paper table 7
             nn.Linear(1024, num_classes)
         )
-
-    def forward(self, x):
-        # Extract features
+    
+    def forward_features(self, x, **kwargs):
+        # We accept 'is_train' via kwargs to satisfy the caller, but we don't use it. The model's internal mode (self.training) handles the behavior.
+        # This works because 'self.convnext' exists in this class!
         f_convnext = self.convnext(x)
         f_efficient = self.efficientnet(x)
         f_swin = self.swin(x)
         
-        # Fuse features
-        f_fused = self.fusion_layer(f_convnext, f_efficient, f_swin)
-        
-        # Classify
-        out = self.classifier(f_fused)
-        
-        return out
+        # Pass the 3 features to the fusion layer
+        return self.fusion_layer(f_convnext, f_efficient, f_swin)
+
+    def forward(self, x):
+        # This standard pipeline pattern now works perfectly
+        x = self.forward_features(x)
+        x = self.classifier(x)
+        return x
 
 # Factory function for builder
 def skin_ehdlf_hybrid(num_classes=2, **kwargs):
