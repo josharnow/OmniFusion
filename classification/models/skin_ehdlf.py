@@ -62,14 +62,26 @@ class SkinEHDLF(nn.Module):
         # We set num_classes=0 to get the feature vector (pooling is usually included by default in timm forward_features + pooling, 
         # or we can grab the representation before the head)
         
-        # ConvNeXt (e.g., convnext_base)
-        self.convnext = timm.create_model('convnext_base', pretrained=pretrained, num_classes=0)
+        # 1. ConvNeXt Base (Facebook 22k pretrain -> 1k finetune)
+        self.convnext = timm.create_model(
+            'convnext_base.fb_in22k_ft_in1k', 
+            pretrained=pretrained, 
+            num_classes=0
+        )
         
-        # EfficientNetV2 (e.g., tf_efficientnetv2_m)
-        self.efficientnet = timm.create_model('tf_efficientnetv2_m', pretrained=pretrained, num_classes=0)
+        # 2. EfficientNetV2-M (ImageNet-21k pretrain -> 1k finetune)
+        self.efficientnet = timm.create_model(
+            'tf_efficientnetv2_m.in21k_ft_in1k', 
+            pretrained=pretrained, 
+            num_classes=0
+        )
         
-        # Swin Transformer (e.g., swin_base_patch4_window7_224)
-        self.swin = timm.create_model('swin_base_patch4_window7_224', pretrained=pretrained, num_classes=0)
+        # 3. Swin Base (Microsoft 22k pretrain -> 1k finetune)
+        self.swin = timm.create_model(
+            'swin_base_patch4_window7_224.ms_in22k_ft_in1k', 
+            pretrained=pretrained, 
+            num_classes=0
+        )
         
         # Determine feature dimensions dynamically
         with torch.no_grad():

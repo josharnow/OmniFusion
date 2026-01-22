@@ -21,7 +21,8 @@ ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm
 # Below is the pretrained checkpoint for the ENTIRE PanDerm dataset (DO NOT USE FOR THESIS)
 # PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
 # Below is the pretrained checkpoint for Imagenet, which the authors used for their pretraining prior to training on the entire dataset from their paper (USE FOR THESIS)
-PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/vit_large_patch16_224.orig_in21k.bin"
+# NOTE - This cannot be used with a hybrid model like SkinEHDLF_Hybrid; need to use the SkinEHDLF-specific pretrained weights. This is handled by timm.create_model('convnext_base.fb_in22k_ft_in1k', pretrained=pretrained, num_classes=0) and other backbone initializations in skin_ehdlf.py
+# PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/vit_large_patch16_224.orig_in21k.bin"
 NUM_WORKERS=0
 
 # --- Define Fold-Specific Paths ---
@@ -102,7 +103,6 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size 1024 \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
