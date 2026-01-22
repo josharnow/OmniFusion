@@ -110,13 +110,11 @@ ${PYTHON} run_class_finetuning.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
     --TTA \
-    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
+    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_LP" \
     --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
@@ -125,9 +123,11 @@ ${PYTHON} run_class_finetuning.py \
     --epochs 10 \
     --enable_linear_eval \
     --freeze_backbone \
-    --focal_loss \
     --stratify_source \
     --no_class_weights
+    # --focal_loss \
+    # --mixup ${MIXUP} \
+    # --cutmix ${CUTMIX}
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -148,8 +148,6 @@ ${PYTHON} run_class_finetuning.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
@@ -157,12 +155,19 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
-    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
+    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
-    --focal_loss \
-    --focal_loss_gamma 4.0 \
     --stratify_source \
-    --no_class_weights
+    --no_class_weights \
+    --mixup 0.8 \
+    --cutmix 1.0 \
+    --mixup_prob 1.0 \
+    --mixup_switch_prob 0.5 \
+    --mixup_mode "batch"
+    # --mixup ${MIXUP} \
+    # --cutmix ${CUTMIX} \
+    # --focal_loss \
+    # --focal_loss_gamma 4.0 \
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
