@@ -92,6 +92,22 @@ class SkinEHDLF(nn.Module):
             nn.Dropout(0.3), # Dropout rate from paper table 7
             nn.Linear(1024, num_classes)
         )
+
+        # --- FIX: Add this attribute to prevent the crash in main() ---
+        self.use_rel_pos_bias = False
+
+    # --- FIX: Add this method for the optimizer (weight decay) ---
+    def no_weight_decay(self):
+        # This model relies on backbones that handle their own decay, 
+        # or we can return an empty set to apply decay everywhere by default.
+        return {}
+
+    # --- FIX: Add this method for the scheduler (layer decay) ---
+    def get_num_layers(self):
+        # The training script uses this for layer-wise learning rate decay.
+        # Since this is a hybrid model, we return 1 and will disable 
+        # layer decay in the arguments.
+        return 1
     
     def forward_features(self, x, **kwargs):
         # We accept 'is_train' via kwargs to satisfy the caller, but we don't use it. The model's internal mode (self.training) handles the behavior.

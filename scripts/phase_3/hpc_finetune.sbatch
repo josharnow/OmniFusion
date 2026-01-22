@@ -39,7 +39,7 @@ LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
-LAYER_DECAY=0.75          #
+LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.3             #
 WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
