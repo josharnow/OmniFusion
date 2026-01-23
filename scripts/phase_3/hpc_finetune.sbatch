@@ -9,14 +9,6 @@
 # --- Set the number of splits for your array ---
 #SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
-# --- Argument Parsing ---
-# Check if "--skip-lp" was passed as an argument to sbatch
-SKIP_LINEAR_PROBE=false
-if [[ "$1" == "--skip-lp" ]]; then
-    SKIP_LINEAR_PROBE=true
-    echo ">>> OPTION DETECTED: Skipping Linear Probe Stage"
-fi
-
 
 
 # --- Your Project Variables ---
@@ -62,6 +54,9 @@ MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICL
 
 DROPOUT_RATE=0.5          # Adding dropout for fine-tuning to reduce overfitting
 
+# Define the expected checkpoint from Linear Probe
+LP_CHECKPOINT="${FOLD_OUTPUT_DIR}/checkpoint-last.pth"
+
 # --- Change to the project root directory ---
 cd ../..
 
@@ -105,8 +100,24 @@ export MASTER_ADDR=localhost
 export MASTER_PORT=12355 # A random, unused port
 
 # --- Linear probing warmup ---
-if [ "$SKIP_LINEAR_PROBE" = false ]; then
-    echo ">>> Running Linear Probe Warmup..."
+# Logic: Skip ONLY if (--skip-lp is passed) AND (checkpoint exists)
+if [[ "$1" == "--skip-lp" ]] && [ -f "$LP_CHECKPOINT" ]; then
+    echo ">>> SKIP ENABLED: --skip-lp flag detected AND checkpoint found at:"
+    echo "    $LP_CHECKPOINT"
+    echo "    Skipping Linear Probe stage."
+else
+    # Verbose logging to explain why it is NOT skipping
+    if [[ "$1" == "--skip-lp" ]]; then
+        echo ">>> CANNOT SKIP: --skip-lp flag provided, but checkpoint NOT found."
+        echo "    Expected: $LP_CHECKPOINT"
+        echo "    Proceeding with Linear Probe to generate the required checkpoint."
+    elif [ -f "$LP_CHECKPOINT" ]; then
+        echo ">>> RE-RUNNING: Checkpoint found, but --skip-lp flag NOT provided."
+        echo ">>> Running Linear Probe (Overwriting previous checkpoint)..."
+    else
+        echo ">>> STARTING: No flag provided and no checkpoint found."
+        echo ">>> Running Linear Probe..."
+    fi
     ${PYTHON} run_class_finetuning.py \
         --model ${MODEL} \
         --csv_path "${FOLD_CSV_PATH}" \
@@ -138,10 +149,6 @@ if [ "$SKIP_LINEAR_PROBE" = false ]; then
         # --focal_loss \
         # --mixup ${MIXUP} \
         # --cutmix ${CUTMIX}
-else
-    echo ">>> Skipping Linear Probe step as requested."
-    # NOTE: Ensure "${FOLD_OUTPUT_DIR}/checkpoint-last.pth" exists 
-    # from a previous run if you are skipping this step!
 fi
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
