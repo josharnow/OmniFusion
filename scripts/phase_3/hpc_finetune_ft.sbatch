@@ -56,9 +56,6 @@ MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICL
 
 DROPOUT_RATE=0.5          # Adding dropout for fine-tuning to reduce overfitting
 
-# Define the expected checkpoint from Linear Probe
-LP_CHECKPOINT="${FOLD_OUTPUT_DIR}/checkpoint-last.pth"
-
 # --- Change to the project root directory ---
 cd ../..
 
@@ -101,57 +98,6 @@ cd classification
 export MASTER_ADDR=localhost
 export MASTER_PORT=12355 # A random, unused port
 
-# --- Linear probing warmup ---
-# Logic: Skip ONLY if (--skip-lp is passed) AND (checkpoint exists)
-if [[ "$1" == "--skip-lp" ]] && [ -f "$LP_CHECKPOINT" ]; then
-    echo ">>> SKIP ENABLED: --skip-lp flag detected AND checkpoint found at:"
-    echo "    $LP_CHECKPOINT"
-    echo "    Skipping Linear Probe stage."
-else
-    # Verbose logging to explain why it is NOT skipping
-    if [[ "$1" == "--skip-lp" ]]; then
-        echo ">>> CANNOT SKIP: --skip-lp flag provided, but checkpoint NOT found."
-        echo "    Expected: $LP_CHECKPOINT"
-        echo "    Proceeding with Linear Probe to generate the required checkpoint."
-    elif [ -f "$LP_CHECKPOINT" ]; then
-        echo ">>> RE-RUNNING: Checkpoint found, but --skip-lp flag NOT provided."
-        echo ">>> Running Linear Probe (Overwriting previous checkpoint)..."
-    else
-        echo ">>> STARTING: No flag provided and no checkpoint found."
-        echo ">>> Running Linear Probe..."
-    fi
-    ${PYTHON} run_class_finetuning.py \
-        --model ${MODEL} \
-        --csv_path "${FOLD_CSV_PATH}" \
-        --data_path "${FOLD_CSV_PATH}" \
-        --batch_size 1024 \
-        --root_path "${ROOT_PATH}" \
-        --output_dir "${FOLD_OUTPUT_DIR}" \
-        --log_dir "${FOLD_OUTPUT_DIR}" \
-        --nb_classes ${NB_CLASSES} \
-        --num_workers ${NUM_WORKERS} \
-        --layer_decay ${LAYER_DECAY} \
-        --drop_path ${DROP_PATH} \
-        --weight_decay ${WEIGHT_DECAY} \
-        --smoothing ${SMOOTHING} \
-        --reprob ${REPROB} \
-        --monitor ${MONITOR} \
-        --TTA \
-        --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_LP" \
-        --weights \
-        --drop ${DROPOUT_RATE} \
-        --clip_grad 1.0 \
-        --lr 1e-2 \
-        --warmup_epochs 2 \
-        --epochs 10 \
-        --enable_linear_eval \
-        --freeze_backbone \
-        --stratify_source \
-        --no_class_weights
-        # --focal_loss \
-        # --mixup ${MIXUP} \
-        # --cutmix ${CUTMIX}
-fi
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
 ${PYTHON} run_class_finetuning.py \
@@ -160,7 +106,7 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-last.pth" \
+    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-last-lp.pth" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \

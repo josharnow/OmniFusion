@@ -271,6 +271,9 @@ def get_args():
     # For thesis stage 3
     parser.add_argument('--val_batch_size', default=None, type=int, 
                         help='Separate batch size for validation/test to prevent OOM during TTA')
+    parser.add_argument('--is_linear_probe', action='store_true',
+                        help='Distinguish linear probe mode.')
+    
 
 
     known_args, _ = parser.parse_known_args()
@@ -1001,7 +1004,7 @@ def main(args, ds_init):
         if args.output_dir:
             utils.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch='last', model_ema=model_ema)
+                loss_scaler=loss_scaler, epoch='last' if not args.is_linear_probe else 'last-lp', model_ema=model_ema)
         # --- +++ END BLOCK +++ ---
 
         # --- +++ MODIFIED FINAL EVALUATION BLOCK (WITH MEMORY CLEANUP) +++ ---
