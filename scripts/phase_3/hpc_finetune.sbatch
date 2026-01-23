@@ -9,6 +9,14 @@
 # --- Set the number of splits for your array ---
 #SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
+# --- Argument Parsing ---
+# Check if "--skip-lp" was passed as an argument to sbatch
+SKIP_LINEAR_PROBE=false
+if [[ "$1" == "--skip-lp" ]]; then
+    SKIP_LINEAR_PROBE=true
+    echo ">>> OPTION DETECTED: Skipping Linear Probe Stage"
+fi
+
 
 
 # --- Your Project Variables ---
@@ -97,38 +105,44 @@ export MASTER_ADDR=localhost
 export MASTER_PORT=12355 # A random, unused port
 
 # --- Linear probing warmup ---
-${PYTHON} run_class_finetuning.py \
-    --model ${MODEL} \
-    --csv_path "${FOLD_CSV_PATH}" \
-    --data_path "${FOLD_CSV_PATH}" \
-    --batch_size 1024 \
-    --root_path "${ROOT_PATH}" \
-    --output_dir "${FOLD_OUTPUT_DIR}" \
-    --log_dir "${FOLD_OUTPUT_DIR}" \
-    --nb_classes ${NB_CLASSES} \
-    --num_workers ${NUM_WORKERS} \
-    --layer_decay ${LAYER_DECAY} \
-    --drop_path ${DROP_PATH} \
-    --weight_decay ${WEIGHT_DECAY} \
-    --smoothing ${SMOOTHING} \
-    --reprob ${REPROB} \
-    --monitor ${MONITOR} \
-    --TTA \
-    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_LP" \
-    --weights \
-    --drop ${DROPOUT_RATE} \
-    --clip_grad 1.0 \
-    --lr 1e-2 \
-    --warmup_epochs 2 \
-    --epochs 10 \
-    --enable_linear_eval \
-    --freeze_backbone \
-    --stratify_source \
-    --no_class_weights
-    # --focal_loss \
-    # --mixup ${MIXUP} \
-    # --cutmix ${CUTMIX}
-
+if [ "$SKIP_LINEAR_PROBE" = false ]; then
+    echo ">>> Running Linear Probe Warmup..."
+    ${PYTHON} run_class_finetuning.py \
+        --model ${MODEL} \
+        --csv_path "${FOLD_CSV_PATH}" \
+        --data_path "${FOLD_CSV_PATH}" \
+        --batch_size 1024 \
+        --root_path "${ROOT_PATH}" \
+        --output_dir "${FOLD_OUTPUT_DIR}" \
+        --log_dir "${FOLD_OUTPUT_DIR}" \
+        --nb_classes ${NB_CLASSES} \
+        --num_workers ${NUM_WORKERS} \
+        --layer_decay ${LAYER_DECAY} \
+        --drop_path ${DROP_PATH} \
+        --weight_decay ${WEIGHT_DECAY} \
+        --smoothing ${SMOOTHING} \
+        --reprob ${REPROB} \
+        --monitor ${MONITOR} \
+        --TTA \
+        --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_LP" \
+        --weights \
+        --drop ${DROPOUT_RATE} \
+        --clip_grad 1.0 \
+        --lr 1e-2 \
+        --warmup_epochs 2 \
+        --epochs 10 \
+        --enable_linear_eval \
+        --freeze_backbone \
+        --stratify_source \
+        --no_class_weights
+        # --focal_loss \
+        # --mixup ${MIXUP} \
+        # --cutmix ${CUTMIX}
+else
+    echo ">>> Skipping Linear Probe step as requested."
+    # NOTE: Ensure "${FOLD_OUTPUT_DIR}/checkpoint-last.pth" exists 
+    # from a previous run if you are skipping this step!
+fi
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
 ${PYTHON} run_class_finetuning.py \
@@ -164,7 +178,8 @@ ${PYTHON} run_class_finetuning.py \
     --mixup_prob 1.0 \
     --mixup_switch_prob 0.5 \
     --mixup_mode "batch" \
-    --update_freq 2
+    --update_freq 2 \
+    --val_batch_size 16
     # --mixup ${MIXUP} \
     # --cutmix ${CUTMIX} \
     # --focal_loss \

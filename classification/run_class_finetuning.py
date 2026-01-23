@@ -268,6 +268,10 @@ def get_args():
     parser.add_argument('--stratify_source', action='store_true',
                         help='Enable stratified sampling by Source (ISIC vs External) AND Label')
 
+    # For thesis stage 3
+    parser.add_argument('--val_batch_size', default=None, type=int, 
+                        help='Separate batch size for validation/test to prevent OOM during TTA')
+
 
     known_args, _ = parser.parse_known_args()
 
@@ -491,7 +495,7 @@ def main(args, ds_init):
     if dataset_val is not None:
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val, sampler=sampler_val,
-            batch_size=int(1.5 * args.batch_size),
+            batch_size=int(1.5 * args.batch_size) if not args.val_batch_size else args.val_batch_size,
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=False
@@ -500,7 +504,7 @@ def main(args, ds_init):
         data_loader_val = None
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, sampler=sampler_test,
-        batch_size=args.batch_size,
+        batch_size=args.batch_size if not args.val_batch_size else args.val_batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
