@@ -445,7 +445,43 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         top5_acc = top_k_accuracy_score(true_label_decode_array, prediction_array, k=5, labels=np.arange(num_class))
     # --- END OF FIX ---
 
-    auc_roc = roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro')
+    try:
+        auc_roc = roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro')
+    except ValueError as e:
+        print("\n" + "="*40)
+        print("!!! CAUGHT NAN ERROR DURING VALIDATION !!!")
+        print("="*40)
+        
+        # 1. Check Predictions for NaNs
+        if np.isnan(prediction_array).any():
+            nan_count = np.sum(np.isnan(prediction_array))
+            total_elements = prediction_array.size
+            nan_rows = np.unique(np.where(np.isnan(prediction_array))[0])
+            
+            print(f"ERROR: 'prediction_array' contains {nan_count} NaNs out of {total_elements} elements.")
+            print(f"Indices of rows (images) containing NaNs: {nan_rows}")
+            
+            # Print the data for the first bad row to see if it's ALL NaNs or just partial
+            if len(nan_rows) > 0:
+                first_bad_idx = nan_rows[0]
+                print(f"\n--- Data Dump for Image Index {first_bad_idx} ---")
+                print(f"Prediction Vector: {prediction_array[first_bad_idx]}")
+                print(f"Ground Truth: {true_label_onehot_array[first_bad_idx]}")
+
+        # 2. Check for Infinity (just in case)
+        if np.isinf(prediction_array).any():
+            print(f"ERROR: 'prediction_array' contains Infinity values!")
+            
+        # 3. Save the arrays to disk for offline analysis
+        print("\n>>> Saving crashed arrays to .npy files for inspection...")
+        np.save("debug_pred_array_crash.npy", prediction_array)
+        np.save("debug_label_array_crash.npy", true_label_onehot_array)
+        print(">>> Saved 'debug_pred_array_crash.npy' and 'debug_label_array_crash.npy'")
+        print("="*40 + "\n")
+        
+        # Re-raise the error so the job stops as expected
+        raise e 
+    # ------------------ DEBUGGING BLOCK END ------------------
 
 
     f1 = f1_score(true_label_decode_array, prediction_decode_array, average='weighted')

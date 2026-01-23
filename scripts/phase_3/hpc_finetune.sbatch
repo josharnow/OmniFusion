@@ -174,7 +174,6 @@ ${PYTHON} run_class_finetuning.py \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
-    --TTA \
     --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
@@ -190,6 +189,7 @@ ${PYTHON} run_class_finetuning.py \
     --update_freq 4 \
     --val_batch_size 12 \
     --disable_amp
+    # --TTA \
     # --mixup ${MIXUP} \
     # --cutmix ${CUTMIX} \
     # --focal_loss \
