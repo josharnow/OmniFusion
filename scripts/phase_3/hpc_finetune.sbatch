@@ -35,7 +35,8 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data.csv"
 # Note: Batch size and LR are adjusted for a single GPU setup
 BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
@@ -175,7 +176,7 @@ ${PYTHON} run_class_finetuning.py \
     --TTA \
     --weights \
     --drop ${DROPOUT_RATE} \
-    --clip_grad 1.0 \
+    --clip_grad 0.5 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
     --stratify_source \
