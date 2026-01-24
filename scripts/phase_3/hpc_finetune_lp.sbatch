@@ -105,7 +105,7 @@ ${PYTHON} run_class_finetuning.py \
     --model ${MODEL} \
     --csv_path "${FOLD_CSV_PATH}" \
     --data_path "${FOLD_CSV_PATH}" \
-    --batch_size 512 \
+    --batch_size 768 \
     --root_path "${ROOT_PATH}" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
