@@ -129,7 +129,8 @@ ${PYTHON} run_class_finetuning.py \
     --freeze_backbone \
     --stratify_source \
     --no_class_weights \
-    --disable_amp
+    --disable_amp \
+    --is_linear_probe
     # --focal_loss \
     # --mixup ${MIXUP} \
     # --cutmix ${CUTMIX}
