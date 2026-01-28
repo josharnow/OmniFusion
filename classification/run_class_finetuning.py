@@ -91,6 +91,7 @@ def get_args():
 
     # TTA
     parser.add_argument('--TTA', action='store_true', default=False)
+    parser.add_argument('--test_tta', action='store_true', default=False, help='Use TTA during final test evaluation only')
     # train monitor
     parser.add_argument('--monitor', default='acc', type=str, help='monitor used in training')
 
@@ -1075,7 +1076,7 @@ def main(args, ds_init):
                 torch.cuda.empty_cache() # Clear cache again before final test run
 
             # --- STEP 5: Run on TEST set using the tuned threshold ---
-            if args.TTA:
+            if args.TTA or args.test_tta:
                 print(f"Starting test with TTA (using threshold={best_threshold:.4f})")
                 test_stats, _, _, _ = evaluate_tta(
                     data_loader_test, model, device, args.output_dir, epoch,
