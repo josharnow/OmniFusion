@@ -7,7 +7,9 @@ cd output/phase_3
 
 for fold_dir in fold_*; do
     echo "Cleaning $fold_dir"
-    rm -f "$fold_dir"/*.pth
+    # NOTE - DO NOT REMOVE checkpoint-last-lp.pth
+    rm -f "$fold_dir"/checkpoint-best.pth
+    rm -f "$fold_dir"/checkpoint-last.pth
     rm -f "$fold_dir"/*.gpu*
     rm -f "$fold_dir"/val.csv
     rm -f "$fold_dir"/test.csv
