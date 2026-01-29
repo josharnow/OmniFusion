@@ -5,6 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
 
 # --- Set the number of splits for your array ---
 #SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
@@ -23,7 +24,7 @@ ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm
 # Below is the pretrained checkpoint for Imagenet, which the authors used for their pretraining prior to training on the entire dataset from their paper (USE FOR THESIS)
 # NOTE - This cannot be used with a hybrid model like SkinEHDLF_Hybrid; need to use the SkinEHDLF-specific pretrained weights. This is handled by timm.create_model('convnext_base.fb_in22k_ft_in1k', pretrained=pretrained, num_classes=0) and other backbone initializations in skin_ehdlf.py
 # PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/vit_large_patch16_224.orig_in21k.bin"
-NUM_WORKERS=0
+NUM_WORKERS=8
 
 # --- Define Fold-Specific Paths ---
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
