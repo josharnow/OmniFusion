@@ -725,60 +725,76 @@ def main(args, ds_init):
                 rel_pos_bias = checkpoint_model[key]
                 src_num_pos, num_attn_heads = rel_pos_bias.size()
                 dst_num_pos, _ = model.state_dict()[key].size()
-                dst_patch_shape = model.patch_embed.patch_shape
-                if dst_patch_shape[0] != dst_patch_shape[1]:
-                    raise NotImplementedError()
-                num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
-                src_size = int((src_num_pos - num_extra_tokens) ** 0.5)
-                dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)
-                if src_size != dst_size:
-                    print("Position interpolate for %s from %dx%d to %dx%d" % (
-                        key, src_size, src_size, dst_size, dst_size))
-                    extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
-                    rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
 
-                    def geometric_progression(a, r, n):
-                        return a * (1.0 - r ** n) / (1.0 - r)
-
-                    left, right = 1.01, 1.5
-                    while right - left > 1e-6:
-                        q = (left + right) / 2.0
-                        gp = geometric_progression(1, q, src_size // 2)
-                        if gp > dst_size // 2:
-                            right = q
+                # FIX: Only attempt interpolation if sizes differ.
+                # This prevents accessing 'model.patch_embed' on SkinEHDLF when not needed.
+                if src_num_pos != dst_num_pos:
+                    # If we are here with SkinEHDLF, we need to find the correct patch_embed
+                    # or skip if it's too complex. For now, assume standard model structure if resizing.
+                    if hasattr(model, 'patch_embed'):
+                        dst_patch_shape = model.patch_embed.patch_shape
+                    else:
+                        # Try to find it in the swin submodule if it exists (common for hybrids)
+                        if hasattr(model, 'swin') and hasattr(model.swin, 'patch_embed'):
+                             dst_patch_shape = model.swin.patch_embed.patch_shape
                         else:
-                            left = q
+                             print(f"Warning: bias mismatch for {key} but patch_embed not found. Skipping interpolation.")
+                             continue
 
-                    dis = []
-                    cur = 1
-                    for i in range(src_size // 2):
-                        dis.append(cur)
-                        cur += q ** (i + 1)
+                    if dst_patch_shape[0] != dst_patch_shape[1]:
+                        raise NotImplementedError()
+                    num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
+                    src_size = int((src_num_pos - num_extra_tokens) ** 0.5)
+                    dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)
+                    
+                    if src_size != dst_size:
+                        print("Position interpolate for %s from %dx%d to %dx%d" % (
+                            key, src_size, src_size, dst_size, dst_size))
+                        extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
+                        rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
 
-                    r_ids = [-_ for _ in reversed(dis)]
+                        def geometric_progression(a, r, n):
+                            return a * (1.0 - r ** n) / (1.0 - r)
 
-                    x = r_ids + [0] + dis
-                    y = r_ids + [0] + dis
+                        left, right = 1.01, 1.5
+                        while right - left > 1e-6:
+                            q = (left + right) / 2.0
+                            gp = geometric_progression(1, q, src_size // 2)
+                            if gp > dst_size // 2:
+                                right = q
+                            else:
+                                left = q
 
-                    t = dst_size // 2.0
-                    dx = np.arange(-t, t + 0.1, 1.0)
-                    dy = np.arange(-t, t + 0.1, 1.0)
+                        dis = []
+                        cur = 1
+                        for i in range(src_size // 2):
+                            dis.append(cur)
+                            cur += q ** (i + 1)
 
-                    print("Original positions = %s" % str(x))
-                    print("Target positions = %s" % str(dx))
+                        r_ids = [-_ for _ in reversed(dis)]
 
-                    all_rel_pos_bias = []
+                        x = r_ids + [0] + dis
+                        y = r_ids + [0] + dis
 
-                    for i in range(num_attn_heads):
-                        z = rel_pos_bias[:, i].view(src_size, src_size).float().numpy()
-                        f = interpolate.interp2d(x, y, z, kind='cubic')
-                        all_rel_pos_bias.append(
-                            torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device))
+                        t = dst_size // 2.0
+                        dx = np.arange(-t, t + 0.1, 1.0)
+                        dy = np.arange(-t, t + 0.1, 1.0)
 
-                    rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                        print("Original positions = %s" % str(x))
+                        print("Target positions = %s" % str(dx))
 
-                    new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
-                    checkpoint_model[key] = new_rel_pos_bias
+                        all_rel_pos_bias = []
+
+                        for i in range(num_attn_heads):
+                            z = rel_pos_bias[:, i].view(src_size, src_size).float().numpy()
+                            f = interpolate.interp2d(x, y, z, kind='cubic')
+                            all_rel_pos_bias.append(
+                                torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device))
+
+                        rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+
+                        new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
+                        checkpoint_model[key] = new_rel_pos_bias
 
         print("##############new keys:", len(checkpoint_model), checkpoint_model.keys())
 
