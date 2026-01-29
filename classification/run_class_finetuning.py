@@ -275,6 +275,9 @@ def get_args():
     parser.add_argument('--is_linear_probe', action='store_true',
                         help='Distinguish linear probe mode.')
     
+    parser.add_argument('--is_skinehdlf', action='store_true', default=False,
+                        help='Designates run as SkinEHDLF model.')
+    
 
 
     known_args, _ = parser.parse_known_args()
@@ -611,33 +614,86 @@ def main(args, ds_init):
         if checkpoint_model is None:
             checkpoint_model = checkpoint
         state_dict = model.state_dict()
-        all_keys = list(checkpoint_model.keys())
-        # print("##########origin keys:", len(all_keys), all_keys)
-        # NOTE: remove all decoder keys
-        all_keys = [key for key in all_keys if key.startswith('encoder.')]
-        print("all keys:", all_keys)
-        for key in all_keys:
-            new_key = key.replace('encoder.','')
-            checkpoint_model[new_key] = checkpoint_model[key]
-            checkpoint_model.pop(key)
 
-        for key in list(checkpoint_model.keys()):
-            if key.startswith('decoder.'):
-                checkpoint_model.pop(key)
-            if key.startswith('teacher.'):
-                checkpoint_model.pop(key)
-
-        # NOTE: replace norm with fc_norm
-        for key in list(checkpoint_model.keys()):
-            if key.startswith('norm.'):
-                new_key = key.replace('norm.','fc_norm.')
+        if not args.is_skinehdlf:
+            all_keys = list(checkpoint_model.keys())
+            # print("##########origin keys:", len(all_keys), all_keys)
+            # NOTE: remove all decoder keys
+            all_keys = [key for key in all_keys if key.startswith('encoder.')]
+            print("all keys:", all_keys)
+            for key in all_keys:
+                new_key = key.replace('encoder.','')
                 checkpoint_model[new_key] = checkpoint_model[key]
                 checkpoint_model.pop(key)
 
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+            for key in list(checkpoint_model.keys()):
+                if key.startswith('decoder.'):
+                    checkpoint_model.pop(key)
+                if key.startswith('teacher.'):
+                    checkpoint_model.pop(key)
+
+            # NOTE: replace norm with fc_norm
+            for key in list(checkpoint_model.keys()):
+                if key.startswith('norm.'):
+                    new_key = key.replace('norm.','fc_norm.')
+                    checkpoint_model[new_key] = checkpoint_model[key]
+                    checkpoint_model.pop(key)
+
+            for k in ['head.weight', 'head.bias']:
+                if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                    print(f"Removing key {k} from pretrained checkpoint")
+                    del checkpoint_model[k]
+        else:
+            # --- FIX: ROBUST KEY REMAPPING ---
+            print(">>> STARTING CHECKPOINT KEY REMAPPING <<<")
+            new_ckpt_model = {}
+            for k, v in checkpoint_model.items():
+                new_k = k
+                # 1. Strip 'module.' prefix (from DDP)
+                if new_k.startswith('module.'):
+                    new_k = new_k[7:]
+                
+                # 2. Strip 'encoder.' prefix (if present from previous save logic)
+                if new_k.startswith('encoder.'):
+                    new_k = new_k.replace('encoder.', '')
+                
+                # 3. Norm replacement (legacy support)
+                if new_k.startswith('norm.'):
+                    new_k = new_k.replace('norm.', 'fc_norm.')
+                    
+                # 4. Filter decoder/teacher keys
+                if new_k.startswith('decoder.') or new_k.startswith('teacher.'):
+                    continue
+                    
+                new_ckpt_model[new_k] = v
+                
+            checkpoint_model = new_ckpt_model
+            
+            # --- DEBUG: Print matched/unmatched keys ---
+            model_keys = set(state_dict.keys())
+            ckpt_keys = set(checkpoint_model.keys())
+            
+            matched_keys = model_keys.intersection(ckpt_keys)
+            missing_keys = model_keys - ckpt_keys
+            unexpected_keys = ckpt_keys - model_keys
+            
+            print(f"Matched Keys: {len(matched_keys)}")
+            print(f"Missing Keys: {len(missing_keys)}")
+            print(f"Unexpected Keys: {len(unexpected_keys)}")
+            
+            if len(missing_keys) > 0:
+                print(f"Sample Missing: {list(missing_keys)[:5]}")
+                
+            # Verify Classifier Head Load
+            # We specifically check for the final layer weights of SkinEHDLF
+            head_key = 'classifier.3.weight'
+            if head_key in matched_keys:
+                print("✅ CLASSIFIER HEAD FOUND IN CHECKPOINT! Transfer Learning should work.")
+            else:
+                print("❌ WARNING: CLASSIFIER HEAD NOT FOUND! Head will be random.")
+                if head_key in unexpected_keys:
+                    print(f"   (It was found in unexpected keys, likely a naming mismatch)")
+            # ------------------------------------------------
 
         if model.use_rel_pos_bias and "rel_pos_bias.relative_position_bias_table" in checkpoint_model:
             print("Expand the shared relative position embedding to each transformer block. ")

@@ -135,7 +135,8 @@ ${PYTHON} run_class_finetuning.py \
     --update_freq 4 \
     --val_batch_size 12 \
     --disable_amp \
-    --test_tta
+    --test_tta \
+    --is_skinehdlf
     # --TTA \
     # --mixup ${MIXUP} \
     # --cutmix ${CUTMIX} \
