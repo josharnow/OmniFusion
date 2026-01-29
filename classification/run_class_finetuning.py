@@ -1,5 +1,12 @@
 # Add these imports at the top of the file
 import os
+# This respects SLURM/Docker resource limits (best for HPC)
+try:
+    print(f"Available CPU cores: {len(os.sched_getaffinity(0))}")
+except AttributeError:
+    # Fallback for systems that don't support sched_getaffinity
+    print(f"Total Physical CPU cores: {os.cpu_count()}")
+
 from dotenv import load_dotenv
 
 # --- ADD THIS DEBUGGING BLOCK AT THE VERY TOP ---
