@@ -591,6 +591,17 @@ def main(args, ds_init):
         if args.pretrained_checkpoint.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.pretrained_checkpoint, map_location='cpu', check_hash=True)
+        elif args.is_skinehdlf:
+            # FIX: Load directly into 'checkpoint' so the extraction loop below can find 'model' inside it.
+            checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) 
+
+            checkpoint_model = checkpoint
+            
+            if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
+                state_dict = checkpoint['state_dict']
+                state_dict = {k: v for k, v in state_dict.items() if 'visual' in k}
+                checkpoint = {}
+                checkpoint['model'] = {k.replace('module.visual.', 'encoder.'): v for k, v in state_dict.items()}
         else:
             checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) # Weights_only changed to fix unpickling error
             checkpoint = {'model': checkpoint_model}
