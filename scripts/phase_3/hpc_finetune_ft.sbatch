@@ -56,7 +56,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting
+DROPOUT_RATE=0.4 # Adding dropout for fine-tuning to reduce overfitting
 
 # --- Change to the project root directory ---
 cd ../..
@@ -131,7 +131,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_class_weights \
     --mixup 0.8 \
     --cutmix 1.0 \
-    --mixup_prob 0.2 \
+    --mixup_prob 1.0 \
     --mixup_switch_prob 0.5 \
     --mixup_mode "batch" \
     --update_freq 4 \
