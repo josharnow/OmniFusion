@@ -921,7 +921,12 @@ def main(args, ds_init):
 
         if mixup_fn is not None:
             # smoothing is handled with mixup label transform
-            criterion = SoftTargetCrossEntropy()
+            if not args.no_class_weights:
+                print("Using Weighted Cross Entropy for Mixup with weights:", class_weights)
+                # PyTorch CrossEntropyLoss handles Soft Targets (N, C) automatically
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            else:
+                criterion = SoftTargetCrossEntropy()
         elif args.smoothing > 0.:
             criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
         elif args.focal_loss:

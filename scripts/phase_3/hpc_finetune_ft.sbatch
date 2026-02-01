@@ -46,7 +46,8 @@ WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.3             #
-WEIGHT_DECAY=0.1         #
+WEIGHT_DECAY=0.05         #
+# WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 MIXUP=0.0                 #
 CUTMIX=0.0                #
@@ -128,8 +129,7 @@ ${PYTHON} run_class_finetuning.py \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
     --stratify_source \
-    --no_class_weights \
-    --mixup 0.8 \
+    --mixup 0.2 \
     --cutmix 1.0 \
     --mixup_prob 1.0 \
     --mixup_switch_prob 0.5 \
@@ -138,7 +138,9 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --disable_amp
+    --disable_amp \
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 3.0
     # --TTA \
     # --mixup ${MIXUP} \
     # --cutmix ${CUTMIX} \
