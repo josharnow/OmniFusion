@@ -34,11 +34,13 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data.csv"
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
-BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-# BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
+# BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
+BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+UPDATE_FREQ=2        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -135,12 +137,11 @@ ${PYTHON} run_class_finetuning.py \
     --mixup_prob 1.0 \
     --mixup_switch_prob 0.5 \
     --mixup_mode "batch" \
-    --update_freq 4 \
+    --update_freq ${UPDATE_FREQ} \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --disable_amp \
-    --no_class_weights
+    --no_class_weights 
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
