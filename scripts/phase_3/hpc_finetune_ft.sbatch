@@ -38,7 +38,7 @@ BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -49,15 +49,16 @@ DROP_PATH=0.3             #
 WEIGHT_DECAY=0.05         #
 # WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
-MIXUP=0.0                 #
-CUTMIX=0.0                #
-# MIXUP=0.8                 #
-# CUTMIX=1.0                #
+# MIXUP=0.0                 #
+# CUTMIX=0.0                #
+MIXUP=0.8                 #
+CUTMIX=0.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+# CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.4 # Adding dropout for fine-tuning to reduce overfitting
+DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting
 
 # --- Change to the project root directory ---
 cd ../..
@@ -129,8 +130,8 @@ ${PYTHON} run_class_finetuning.py \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
     --stratify_source \
-    --mixup 0.2 \
-    --cutmix 1.0 \
+    --mixup ${MIXUP} \
+    --cutmix ${CUTMIX} \
     --mixup_prob 1.0 \
     --mixup_switch_prob 0.5 \
     --mixup_mode "batch" \
@@ -139,11 +140,8 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --disable_amp \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 3.0
+    --no_class_weights
     # --TTA \
-    # --mixup ${MIXUP} \
-    # --cutmix ${CUTMIX} \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
 
