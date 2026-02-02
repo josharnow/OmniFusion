@@ -368,7 +368,7 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         true_label = F.one_hot(target.to(torch.int64), num_classes=num_class)
 
         # compute output
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             output = model(images)
             loss = criterion(output, target)
 
