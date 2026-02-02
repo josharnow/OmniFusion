@@ -39,8 +39,8 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data.csv"
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=2        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -51,10 +51,10 @@ DROP_PATH=0.3             #
 WEIGHT_DECAY=0.05         #
 # WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
-# MIXUP=0.0                 #
-# CUTMIX=0.0                #
-MIXUP=0.8                 #
-CUTMIX=0.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+MIXUP=0.0                 #
+CUTMIX=0.0                #
+# MIXUP=0.8                 #
+# CUTMIX=0.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 SMOOTHING=0.0
 REPROB=0.25               #
@@ -142,7 +142,7 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 1.2
+    --custom_minority_alpha 1.5
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
