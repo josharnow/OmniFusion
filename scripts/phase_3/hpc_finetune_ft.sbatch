@@ -53,7 +53,7 @@ WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
 # MIXUP=0.0                 #
-MIXUP=0.8                 #
+MIXUP=0.5                 #
 # MIXUP=0.8                 #
 CUTMIX=0.0                
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
@@ -143,7 +143,7 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 10.0
+    --custom_minority_alpha 3.0
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
