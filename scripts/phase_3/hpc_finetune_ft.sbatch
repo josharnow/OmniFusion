@@ -48,8 +48,8 @@ WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.3             #
-WEIGHT_DECAY=0.05         #
-# WEIGHT_DECAY=0.1         #
+# WEIGHT_DECAY=0.05         #
+WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
 # MIXUP=0.0                 #
@@ -61,7 +61,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting
+DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting
 
 # --- Change to the project root directory ---
 cd ../..
@@ -142,8 +142,7 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 5
+    --no_class_weights
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
