@@ -1074,7 +1074,7 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch='best' if not args.is_linear_probe else 'best-lp', model_ema=model_ema)
             print(f'Max AUCROC: {max_performance:.2f}%')
         elif args.monitor == 'acc':
 
@@ -1083,7 +1083,7 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch='best' if not args.is_linear_probe else 'best-lp', model_ema=model_ema)
             print(f'Max val mean accuracy: {max_performance:.2f}%') 
 
         elif args.monitor == 'recall':
@@ -1092,7 +1092,7 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch='best' if not args.is_linear_probe else 'best-lp', model_ema=model_ema)
             print(f'Max val mean recall: {max_performance:.2f}%')
 
         # --- +++ ADD THIS BLOCK +++ ---
