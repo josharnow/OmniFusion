@@ -146,7 +146,6 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --focal_loss \
     --focal_loss_gamma 4.0 \
-    --enable_linear_eval \
     --no_class_weights
     # --custom_majority_alpha 1.0 \
     # --custom_minority_alpha 5.0
