@@ -285,6 +285,9 @@ def get_args():
     parser.add_argument('--is_skinehdlf', action='store_true', default=False,
                         help='Designates run as SkinEHDLF model.')
     
+    parser.add_argument('--is_stage_1_ft', action='store_true', default=False,
+                        help='Designates at Stage 1 Fine-Tuning run for SkinEHDLF.')
+    
 
 
     known_args, _ = parser.parse_known_args()
@@ -1068,13 +1071,23 @@ def main(args, ds_init):
         val_bacc, val_acc, val_auc_roc, valwf1, val_mean_recall = wandb_res['Val BAcc'], wandb_res['Val Acc'] , wandb_res['Val ROC'], \
             wandb_res['Val W_F1'], wandb_res['Val Recall_macro']
         wandb.log(wandb_res)
+
+        checkpoint_suffix_best = "best"
+        checkpoint_suffix_last = "last"
+        if args.is_linear_probe:
+            checkpoint_suffix_best = "best-lp"
+            checkpoint_suffix_last = "last-lp"
+        elif args.is_stage_1_ft:
+            checkpoint_suffix_best = "best-stage-1"
+            checkpoint_suffix_last = "last-stage-1"
+
         if args.nb_classes == 2:
             if max_performance < val_auc_roc:
                 max_performance = val_auc_roc
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best' if not args.is_linear_probe else 'best-lp', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
             print(f'Max AUCROC: {max_performance:.2f}%')
         elif args.monitor == 'acc':
 
@@ -1083,7 +1096,7 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best' if not args.is_linear_probe else 'best-lp', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
             print(f'Max val mean accuracy: {max_performance:.2f}%') 
 
         elif args.monitor == 'recall':
@@ -1092,7 +1105,7 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best' if not args.is_linear_probe else 'best-lp', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
             print(f'Max val mean recall: {max_performance:.2f}%')
 
         # --- +++ ADD THIS BLOCK +++ ---
@@ -1100,7 +1113,7 @@ def main(args, ds_init):
         if args.output_dir:
             utils.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch='last' if not args.is_linear_probe else 'last-lp', model_ema=model_ema)
+                loss_scaler=loss_scaler, epoch=checkpoint_suffix_last, model_ema=model_ema)
         # --- +++ END BLOCK +++ ---
 
         # --- +++ MODIFIED FINAL EVALUATION BLOCK (WITH MEMORY CLEANUP) +++ ---

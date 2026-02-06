@@ -3,7 +3,7 @@ import os
 import sys
 
 # ================= CONFIGURATION =================
-CSV_PATH_TEMPLATE = '/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3/fold_{fold}/fold_data.csv'
+CSV_PATH_TEMPLATE = '/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3/fold_{fold}/fold_data_external.csv'
 # =================================================
 
 def main():
@@ -28,7 +28,7 @@ def main():
     csv_path = CSV_PATH_TEMPLATE.format(fold=fold_num)
     if not os.path.exists(csv_path):
         # Fallback check
-        alt_path = csv_path.replace("fold_data.csv", f"fold_data_{fold_num}.csv")
+        alt_path = csv_path.replace("fold_data_external.csv", f"fold_data_external_{fold_num}.csv")
         if os.path.exists(alt_path):
             csv_path = alt_path
     
