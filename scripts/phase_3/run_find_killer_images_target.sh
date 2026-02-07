@@ -15,4 +15,4 @@ source venv/bin/activate
 
 cd scripts/phase_3
 
-python3 find_killer_images.py
+python3 find_killer_images.py --file_name fold_data_target.csv

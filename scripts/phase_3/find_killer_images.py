@@ -1,12 +1,13 @@
 import pandas as pd
 import os
 import sys
+import argparse
 
 # ================= CONFIGURATION =================
-CSV_PATH_TEMPLATE = '/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3/fold_{fold}/fold_data_external.csv'
+CSV_PATH_TEMPLATE = '/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3/fold_{fold}/{file_name}'
 # =================================================
 
-def main():
+def main(file_name):
     print("--- PanDerm Crash Investigator (With Shuffle Replication) ---")
     
     # 1. Get Inputs
@@ -25,7 +26,7 @@ def main():
         return
 
     # 2. Load CSV
-    csv_path = CSV_PATH_TEMPLATE.format(fold=fold_num)
+    csv_path = CSV_PATH_TEMPLATE.format(fold=fold_num, file_name=file_name)
     if not os.path.exists(csv_path):
         # Fallback check
         alt_path = csv_path.replace("fold_data_external.csv", f"fold_data_external_{fold_num}.csv")
@@ -75,6 +76,16 @@ def main():
         print(f"Filename: {img_name}")
         print(f"Label:    {label}")
         print("-" * 20)
+        
+def get_args():
+    parser = argparse.ArgumentParser(description='Scan dataset for toxic images')
+    parser.add_argument('--file_name', type=str, default=None, help="CSV file name (e.g. fold_data_external.csv)")
+    return parser.parse_args()
 
 if __name__ == "__main__":
-    main()
+    args = get_args()
+    if args.file_name is None:
+        print("Error: --file_name argument is required.")
+        exit(1)
+
+    main(args.file_name)
