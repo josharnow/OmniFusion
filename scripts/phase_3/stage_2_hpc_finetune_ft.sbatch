@@ -145,12 +145,11 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --no_class_weights \
-    --no_auto_resume
+    --no_auto_resume \
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 5.0
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
-    # --custom_majority_alpha 1.0 \
-    # --custom_minority_alpha 5.0
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
