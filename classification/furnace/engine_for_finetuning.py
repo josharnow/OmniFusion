@@ -227,8 +227,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        # TODO - Change conditional to look for --disable-amp flag
-        # if loss_scaler is None:
         if args and args.disable_amp:
             loss_value, output, loss_scale_value, grad_norm = train_full_precision(
                 model, samples, targets, criterion, optimizer,
@@ -238,17 +236,44 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             loss_value, output, loss_scale_value, grad_norm = train_amp(
                 model, samples, targets, criterion, optimizer,
                 data_iter_step, update_freq, loss_scaler, max_norm, model_ema)
-            
-            # raise NotImplementedError("Only Full Precision (FP32) training is implemented in this version.")
 
         torch.cuda.synchronize()
 
         if mixup_fn is None:
-            class_acc = (output.max(-1)[-1] == targets).float().mean()
+            # --- START: MODIFIED METRICS ---
+            preds = output.max(-1)[-1]
+            class_acc = (preds == targets).float().mean()
+            
+            # Calculate Sensitivity (Recall Class 1) and Specificity (Recall Class 0)
+            # Note: This assumes Binary Classification where 1=Cancer, 0=Benign
+            
+            # True Positives: Predicted 1, Actual 1
+            tp = ((preds == 1) & (targets == 1)).sum().float()
+            # False Negatives: Predicted 0, Actual 1
+            fn = ((preds == 0) & (targets == 1)).sum().float()
+            # True Negatives: Predicted 0, Actual 0
+            tn = ((preds == 0) & (targets == 0)).sum().float()
+            # False Positives: Predicted 1, Actual 0
+            fp = ((preds == 1) & (targets == 0)).sum().float()
+
+            # Add epsilon to avoid divide-by-zero if a batch is missing a class (unlikely with sampler)
+            sens = tp / (tp + fn + 1e-8)
+            spec = tn / (tn + fp + 1e-8)
+            # --- END: MODIFIED METRICS ---
         else:
             class_acc = None
+            sens = None
+            spec = None
+
         metric_logger.update(loss=loss_value)
         metric_logger.update(class_acc=class_acc)
+        
+        # Add new metrics to logger
+        if sens is not None:
+            metric_logger.update(sens=sens)
+        if spec is not None:
+            metric_logger.update(spec=spec)
+            
         metric_logger.update(loss_scale=loss_scale_value)
         min_lr = 10.
         max_lr = 0.
@@ -268,6 +293,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
             log_writer.update(class_acc=class_acc, head="loss")
+            
+            # Log new metrics to tensorboard/wandb
+            if sens is not None:
+                log_writer.update(class_sens=sens, head="loss")
+            if spec is not None:
+                log_writer.update(class_spec=spec, head="loss")
+                
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
@@ -489,9 +521,10 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
     recall1 = recall_score(true_label_decode_array, prediction_decode_array, average='weighted')
 
     print('-------------', mode, '-------------')
+    # --- MODIFIED LOGGING: Output Sensitivity and Specificity ---
     print(
-        'Sklearn Metrics - BAcc: {:.4f} Acc: {:.4f} Recall_macro: {:.4f} Recall_weighted: {:.4f} AUC-ROC: {:.4f} Weighted F1-score: {:.4f}'.format(
-            bacc, acc, recall, recall1, auc_roc, f1))
+        'Sklearn Metrics - BAcc: {:.4f} Acc: {:.4f} Sens: {:.4f} Spec: {:.4f} Recall_macro: {:.4f} Recall_weighted: {:.4f} AUC-ROC: {:.4f} Weighted F1-score: {:.4f}'.format(
+            bacc, acc, macro_sensitivity, macro_specificity, recall, recall1, auc_roc, f1))
     
     # Record with dict for return value
     metrics = {
@@ -538,6 +571,8 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
             'Val Loss': loss.item(),
             'Val BAcc': bacc,
             'Val Acc': acc,
+            'Val Sens': macro_sensitivity, # Added Sens
+            'Val Spec': macro_specificity, # Added Spec
             'Val ROC': auc_roc,
             f'{mode.capitalize()} W_F1': f1,
             f'{mode.capitalize()} Recall_macro': recall,
@@ -547,6 +582,8 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         wandb_res = {
             f'{mode.capitalize()} BAcc': bacc,
             f'{mode.capitalize()} Acc': acc,
+            f'{mode.capitalize()} Sens': macro_sensitivity, # Added Sens
+            f'{mode.capitalize()} Spec': macro_specificity, # Added Spec
             f'{mode.capitalize()} ROC': auc_roc,
             f'{mode.capitalize()} F1': f1,
             f'{mode.capitalize()} Recall_macro': recall,
