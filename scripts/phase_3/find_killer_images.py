@@ -7,16 +7,29 @@ import argparse
 CSV_PATH_TEMPLATE = '/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3/fold_{fold}/{file_name}'
 # =================================================
 
-def main(file_name):
+def get_args():
+    parser = argparse.ArgumentParser(description='Scan dataset for toxic images')
+    parser.add_argument('--file_name', type=str, required=True, help="CSV file name (e.g. fold_data_target.csv)")
+    parser.add_argument('--fold', type=str, default=None, help="Fold Number")
+    parser.add_argument('--indices', type=str, default=None, help="Comma separated indices (e.g. '10,20,30')")
+    return parser.parse_args()
+
+def main():
+    # Parse arguments first
+    args = get_args()
+    file_name = args.file_name
+    
     print("--- PanDerm Crash Investigator (With Shuffle Replication) ---")
     
-    # 1. Get Inputs
+    # 1. Get Inputs (Use Args or Fallback to Interactive)
+    fold_num = args.fold
+    indices_str = args.indices
+
     try:
-        if len(sys.argv) > 2:
-            fold_num = sys.argv[1]
-            indices_str = sys.argv[2]
-        else:
+        if fold_num is None:
             fold_num = input("Enter Fold Number (e.g., 3): ").strip()
+        
+        if indices_str is None:
             indices_str = input("Enter Crash Indices (comma separated): ").strip()
         
         target_indices = [int(idx.strip()) for idx in indices_str.split(',') if idx.strip().isdigit()]
@@ -34,6 +47,10 @@ def main(file_name):
             csv_path = alt_path
     
     print(f"\n>>> Loading CSV: {csv_path}")
+    if not os.path.exists(csv_path):
+        print(f"ERROR: File not found at {csv_path}")
+        return
+
     df = pd.read_csv(csv_path)
     
     # ==============================================================================
@@ -53,8 +70,6 @@ def main(file_name):
         return
 
     # 4. Find the Files
-    # The DataLoader accesses the validation set using iloc (positional indexing)
-    # on the filtered dataframe.
     print(f"Validation Set Size: {len(val_df)}")
     print("\n" + "="*40)
     print(f"KILLER IMAGES FOR FOLD {fold_num}")
@@ -66,7 +81,6 @@ def main(file_name):
             continue
             
         # Use iloc to grab the row by its INTEGER position in the validation set
-        # This matches how __getitem__ works in your Uni_Dataset
         row = val_df.iloc[idx]
         
         img_name = row.get('image', row.get('image_id', 'UNKNOWN'))
@@ -76,16 +90,6 @@ def main(file_name):
         print(f"Filename: {img_name}")
         print(f"Label:    {label}")
         print("-" * 20)
-        
-def get_args():
-    parser = argparse.ArgumentParser(description='Scan dataset for toxic images')
-    parser.add_argument('--file_name', type=str, default=None, help="CSV file name (e.g. fold_data_external.csv)")
-    return parser.parse_args()
 
 if __name__ == "__main__":
-    args = get_args()
-    if args.file_name is None:
-        print("Error: --file_name argument is required.")
-        exit(1)
-
-    main(args.file_name)
+    main()
