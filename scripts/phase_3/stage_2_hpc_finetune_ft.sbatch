@@ -30,7 +30,8 @@ NUM_WORKERS=8
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
 # This path construction is crucial for the job array to work correctly.
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}"
-FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_target.csv"
+FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_combined.csv"
+# FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_target.csv"
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
@@ -54,10 +55,10 @@ DROP_PATH=0.4             #
 # WEIGHT_DECAY=0.05         #
 WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
-# CUTMIX=0.0                #
+CUTMIX=0.0                #
 MIXUP=0.0                 #
 # MIXUP=0.8                 #
-CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+# CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
 # CUTMIX=0.0                
 SMOOTHING=0.0
@@ -145,9 +146,9 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --no_auto_resume \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 5.0
+    --no_auto_resume
+    # --custom_majority_alpha 1.0 \
+    # --custom_minority_alpha 5.0
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
