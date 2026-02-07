@@ -96,14 +96,24 @@ class SkinEHDLF(nn.Module):
         self.fusion_dim = 1024 # Size of the fused vector
         self.fusion_layer = AdaptiveFeatureFusion(dim1, dim2, dim3, common_dim=self.fusion_dim)
         
-        # 3. Classification Head (Dense Layer + Output)
-        # The SkinEHDLF paper mentions a Dense Layer (1024 units) before the final output
-        self.classifier = nn.Sequential(
-            nn.Linear(self.fusion_dim, 1024),
-            nn.ReLU(),
-            nn.Dropout(0.3), # Dropout rate from paper table 7
-            nn.Linear(1024, num_classes)
-        )
+        # 3. Classification Head (Deep Dense Stack)
+        # MODIFIED: Implemented the 6-layer Dense Head described in Table 7 of the SkinEHDLF paper.
+        # This consists of 5 hidden layers (1024 units) and 1 output layer.
+        
+        layers = []
+        input_dim = self.fusion_dim # Starts at 1024
+        
+        # Create 5 hidden layers
+        for i in range(5):
+            layers.append(nn.Linear(input_dim, 1024))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(0.3)) # Dropout rate from paper table 7
+            input_dim = 1024 # Next layer input is 1024
+            
+        # Final Output Layer (6th layer)
+        layers.append(nn.Linear(input_dim, num_classes))
+        
+        self.classifier = nn.Sequential(*layers)
 
         # --- FIX: Add this attribute to prevent the crash in main() ---
         self.use_rel_pos_bias = False
