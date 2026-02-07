@@ -28,7 +28,7 @@ NUM_WORKERS=8
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
 # This path construction is crucial for the job array to work correctly.
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/experiment/fold_1"
-FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
+FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_target.csv"
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
