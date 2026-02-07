@@ -55,7 +55,8 @@ class SkinEHDLF(nn.Module):
     Hybrid model combining ConvNeXt, EfficientNetV2, and Swin Transformer
     with Adaptive Feature Fusion.
     """
-    def __init__(self, num_classes=2, pretrained=True):
+    # --- MODIFICATION: Added drop_rate argument to init ---
+    def __init__(self, num_classes=2, pretrained=True, drop_rate=0.3, **kwargs):
         super().__init__()
         
         # 1. Define Backbones (Feature Extractors) using timm
@@ -100,6 +101,8 @@ class SkinEHDLF(nn.Module):
         # MODIFIED: Implemented the 6-layer Dense Head described in Table 7 of the SkinEHDLF paper.
         # This consists of 5 hidden layers (1024 units) and 1 output layer.
         
+        print(f"Building 6-layer head with Dropout Rate: {drop_rate}")
+
         layers = []
         input_dim = self.fusion_dim # Starts at 1024
         
@@ -107,7 +110,7 @@ class SkinEHDLF(nn.Module):
         for i in range(5):
             layers.append(nn.Linear(input_dim, 1024))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(0.3)) # Dropout rate from paper table 7
+            layers.append(nn.Dropout(drop_rate)) # Uses the drop_rate passed from arguments
             input_dim = 1024 # Next layer input is 1024
             
         # Final Output Layer (6th layer)
