@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=exp_3
-#SBATCH --output=../../logs/phase_3/finetune_job_%A_%a.out
-#SBATCH --error=../../logs/phase_3/finetune_job_%A_%a.err
+#SBATCH --output=../../logs/phase_3/finetune_job_%A.out
+#SBATCH --error=../../logs/phase_3/finetune_job_%A.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
