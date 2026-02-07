@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=PanDerm
+#SBATCH --job-name=exp_1
 #SBATCH --output=../../logs/phase_3/finetune_job_%A_%a.out
 #SBATCH --error=../../logs/phase_3/finetune_job_%A_%a.err
 #SBATCH --nodes=1
@@ -35,7 +35,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 # BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
-UPDATE_FREQ=1        
+UPDATE_FREQ=4        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -144,9 +144,8 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --no_auto_resume \
-    --sq_root_loss
-    # --custom_majority_alpha 1.0 \
-    # --custom_minority_alpha 5.0
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 15.0
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
