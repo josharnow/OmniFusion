@@ -62,7 +62,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
@@ -144,9 +144,8 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --no_auto_resume \
-    --sq_root_loss
-    # --custom_majority_alpha 1.0 \
-    # --custom_minority_alpha 5.0
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 5.0
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
