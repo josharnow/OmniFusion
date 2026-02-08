@@ -34,14 +34,14 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_external.cs
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
-BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
+# BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-# BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-WARMUP_EPOCHS=5           #
+WARMUP_EPOCHS=2           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.3             #
@@ -55,7 +55,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.5          # Adding dropout for fine-tuning to reduce overfitting
+DROPOUT_RATE=0.3          # Adding dropout for fine-tuning to reduce overfitting
 
 # Define the expected checkpoint from Linear Probe
 LP_CHECKPOINT="${FOLD_OUTPUT_DIR}/checkpoint-last.pth"
@@ -123,15 +123,15 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
-    --lr 1e-2 \
-    --warmup_epochs 2 \
+    --lr 1e-3 \
+    --warmup_epochs ${WARMUP_EPOCHS} \
     --epochs 10 \
     --enable_linear_eval \
     --freeze_backbone \
     --stratify_source \
     --no_class_weights \
-    --disable_amp \
-    --is_linear_probe
+    --is_linear_probe \
+    --no_auto_resume
     # --focal_loss \
     # --mixup ${MIXUP} \
     # --cutmix ${CUTMIX}
