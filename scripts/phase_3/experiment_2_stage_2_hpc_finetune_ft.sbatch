@@ -34,12 +34,12 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_target.csv"
 # Note: Batch size and LR are adjusted for a single GPU setup
 # BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-BATCH_SIZE=80             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-2        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -55,9 +55,9 @@ WEIGHT_DECAY=0.1         #
 # CUTMIX=0.0                #
 MIXUP=0.0                 #
 # MIXUP=0.8                 #
-CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+# CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
-# CUTMIX=0.0                
+CUTMIX=0.0                
 SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
@@ -143,7 +143,9 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --no_auto_resume \
-    --no_class_weights
+    --no_class_weights \
+    --enable_linear_eval \
+    --freeze_backbone \
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
