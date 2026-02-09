@@ -145,8 +145,8 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --no_class_weights \
     --enable_linear_eval \
-    --freeze_backbone
-    # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
+    --freeze_backbone \
+    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
