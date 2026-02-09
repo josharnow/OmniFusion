@@ -58,7 +58,7 @@ MIXUP=0.0                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
 # CUTMIX=0.0                
-SMOOTHING=0.0
+SMOOTHING=0.1
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
@@ -145,7 +145,7 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --no_auto_resume \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 2.0
+    --custom_minority_alpha 1.0
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
