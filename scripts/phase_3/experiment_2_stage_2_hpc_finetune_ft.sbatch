@@ -62,6 +62,8 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
+aa="rand-m9-mstd0.5-inc1"
+
 DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
@@ -131,7 +133,7 @@ ${PYTHON} run_class_finetuning.py \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --wandb_name "EXPERIMENT_Fold_1_Phase3_FT" \
-    --aa 'rand-m9-mstd0.5-inc1' \
+    --aa "${aa}" \
     --stratify_source \
     --mixup ${MIXUP} \
     --cutmix ${CUTMIX} \
@@ -146,7 +148,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_class_weights \
     --enable_linear_eval \
     --freeze_backbone \
-    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
+    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth"
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \

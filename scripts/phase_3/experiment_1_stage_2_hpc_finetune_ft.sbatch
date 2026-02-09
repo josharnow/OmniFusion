@@ -35,7 +35,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 # BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
-UPDATE_FREQ=4        
+UPDATE_FREQ=1       
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -53,14 +53,16 @@ DROP_PATH=0.1             #
 WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
-# MIXUP=0.0                 #
+MIXUP=0.0                 #
 # MIXUP=0.8                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
-MIXUP=0.8                 #
+# MIXUP=0.8                 #
 CUTMIX=0.0                
 SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
+
+aa="rand-m9-mstd0.5-inc1"
 
 DROPOUT_RATE=0.2 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
@@ -132,7 +134,7 @@ ${PYTHON} run_class_finetuning.py \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --wandb_name "EXPERIMENT_Fold_1_Phase3_FT" \
-    --aa 'rand-m9-mstd0.5-inc1' \
+    --aa "${aa}" \
     --stratify_source \
     --mixup ${MIXUP} \
     --cutmix ${CUTMIX} \

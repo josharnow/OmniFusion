@@ -136,7 +136,7 @@ def get_args():
     # Augmentation parameters
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT',
                         help='Color jitter factor (default: 0.4)')
-    parser.add_argument('--aa', type=str, default='', metavar='NAME',
+    parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
                         help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)'),
     parser.add_argument('--smoothing', type=float, default=0.1,
                         help='Label smoothing (default: 0.1)')
@@ -330,8 +330,8 @@ class FocalLoss(nn.Module):
 
 def main(args, ds_init):
 
-    if not args.enable_linear_eval:
-        args.aa = 'rand-m9-mstd0.5-inc1'
+    # if not args.enable_linear_eval:
+    #     args.aa = 'rand-m9-mstd0.5-inc1'
 
     print(args)
 
