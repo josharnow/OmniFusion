@@ -40,14 +40,14 @@ UPDATE_FREQ=4
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=2e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=4e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
-DROP_PATH=0.4             #
+DROP_PATH=0.1             #
 # DROP_PATH=0.3             #
 # WEIGHT_DECAY=0.05         #
 WEIGHT_DECAY=0.1         #
@@ -62,7 +62,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.2 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
@@ -145,7 +145,7 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --no_auto_resume \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 3.0
+    --custom_minority_alpha 2.0
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
