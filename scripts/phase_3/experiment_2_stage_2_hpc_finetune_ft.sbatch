@@ -28,7 +28,7 @@ NUM_WORKERS=8
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
 # This path construction is crucial for the job array to work correctly.
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/experiment/fold_1"
-FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
+FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_target.csv"
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
@@ -62,7 +62,8 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-aa="rand-m9-mstd0.5-inc1"
+aa=""
+# aa="rand-m9-mstd0.5-inc1"
 
 DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 

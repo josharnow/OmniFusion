@@ -40,17 +40,17 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=4e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=6e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
-DROP_PATH=0.1             #
+DROP_PATH=0.4             #
 # DROP_PATH=0.3             #
 # WEIGHT_DECAY=0.05         #
-WEIGHT_DECAY=0.1         #
+WEIGHT_DECAY=0.2         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
 # MIXUP=0.0                 #
@@ -64,7 +64,7 @@ MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICL
 
 aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
 
-DROPOUT_RATE=0.2 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
