@@ -40,7 +40,8 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-3        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
@@ -52,10 +53,10 @@ DROP_PATH=0.3             #
 # WEIGHT_DECAY=0.05         #
 WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
-# CUTMIX=0.0                #
-# MIXUP=0.0                 #
-MIXUP=0.8                 #
-CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+CUTMIX=0.0                #
+MIXUP=0.0                 #
+# MIXUP=0.8                 #
+# CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
 # CUTMIX=0.0                
 SMOOTHING=0.0
@@ -148,8 +149,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --custom_majority_alpha 1.0 \
     --custom_minority_alpha 2.0 \
-    --is_experiment \
-    --disable_amp
+    --is_experiment
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \

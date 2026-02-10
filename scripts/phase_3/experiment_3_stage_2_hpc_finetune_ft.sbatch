@@ -130,7 +130,6 @@ ${PYTHON} run_class_finetuning.py \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
-    --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --wandb_name "EXPERIMENT_Fold_1_Phase3_FT" \
@@ -147,9 +146,9 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --no_auto_resume \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 2.0 \
-    --is_experiment \
-    --disable_amp
+    --custom_minority_alpha 5.0 \
+    --is_experiment
+    # --weights \
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \
