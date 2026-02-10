@@ -288,6 +288,9 @@ def get_args():
     parser.add_argument('--is_stage_1_ft', action='store_true', default=False,
                         help='Designates at Stage 1 Fine-Tuning run for SkinEHDLF.')
     
+    parser.add_argument('--is_experiment', action='store_true', default=False,
+                        help='Designates as experimental run')
+    
 
 
     known_args, _ = parser.parse_known_args()
@@ -1080,6 +1083,10 @@ def main(args, ds_init):
         elif args.is_stage_1_ft:
             checkpoint_suffix_best = "best-stage-1"
             checkpoint_suffix_last = "last-stage-1"
+
+        if args.is_experiment:
+            checkpoint_suffix_best = checkpoint_suffix_best + '-experiment'
+            checkpoint_suffix_last = checkpoint_suffix_last + '-experiment'
 
         if args.nb_classes == 2:
             if max_performance < val_auc_roc:
