@@ -330,7 +330,26 @@ class FocalLoss(nn.Module):
         elif self.reduction == 'sum':
             return focal_loss.sum()
         return focal_loss
+    
+# --- FIX: Authors' Exact SkinEHDLF Augmentation Recipe ---
+# 1. Rotation +/- 30 (Paper)
+# 2. Scaling/Cropping (Paper)
+# 3. H/V Flips (Paper)
+# 4. Color Jitter: Brightness/Contrast/Sat (Paper says these specifically)
+# 5. Gaussian Noise (Paper)
 
+# Define Gaussian Noise transform
+class AddGaussianNoise(object):
+    def __init__(self, mean=0., std=0.05): # Small amount of noise
+        self.std = std
+        self.mean = mean
+        
+    def __call__(self, tensor):
+        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+    
 def main(args, ds_init):
 
     # if not args.enable_linear_eval:
@@ -362,15 +381,31 @@ def main(args, ds_init):
     std = [0.228, 0.224, 0.225]
 
     normalize = transforms.Normalize(mean=mean, std=std)
-    train_trans = [
-        transforms.Resize(256),
-        transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(45),
-        transforms.ColorJitter(hue=0.2),
-        transforms.ToTensor(),
-        normalize]
+
+    if not args.is_skinehdlf:
+        train_trans = [
+            transforms.Resize(256),
+            transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomRotation(45),
+            transforms.ColorJitter(hue=0.2),
+            transforms.ToTensor(),
+            normalize
+        ]
+    else:
+        train_trans = [
+            transforms.Resize(256),
+            transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)), # Scaling/Cropping
+            transforms.RandomHorizontalFlip(p=0.5), # Flipping
+            transforms.RandomVerticalFlip(p=0.5),   # Flipping
+            transforms.RandomRotation(30),          # Rotation +/- 30 (Paper)
+            # Paper: "Random modifications to brightness, contrast, and saturation"
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1), 
+            transforms.ToTensor(),
+            AddGaussianNoise(0., 0.05),             # Gaussian Noise (Paper)
+            normalize
+        ]
 
     val_trans = [transforms.Resize(256),
                  transforms.CenterCrop(args.input_size),
