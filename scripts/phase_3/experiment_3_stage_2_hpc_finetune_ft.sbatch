@@ -34,7 +34,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 # Note: Batch size and LR are adjusted for a single GPU setup
 # BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-BATCH_SIZE=32             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -145,9 +145,10 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --no_auto_resume \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 5.0 \
-    --is_experiment
+    --is_experiment \
+    --sq_root_loss
+    # --custom_majority_alpha 1.0 \
+    # --custom_minority_alpha 5.0 \
     # --weights \
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
