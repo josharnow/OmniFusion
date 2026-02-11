@@ -147,7 +147,9 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --no_auto_resume \
     --is_experiment \
-    --sq_root_loss
+    --sq_root_loss \
+    --focal_loss \
+    --focal_loss_gamma 2.0
     # --custom_majority_alpha 1.0 \
     # --custom_minority_alpha 5.0 \
     # --weights \
