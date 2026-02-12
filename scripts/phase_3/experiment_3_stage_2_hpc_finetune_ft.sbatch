@@ -37,15 +37,15 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=5           #
-EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
+EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.2             #
 # DROP_PATH=0.3             #
@@ -53,7 +53,8 @@ WEIGHT_DECAY=0.05         #
 # WEIGHT_DECAY=0.2         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
-MIXUP=0.0                 #
+# MIXUP=0.0                 #
+MIXUP=0.4                 #
 # MIXUP=0.8                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
@@ -144,6 +145,7 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
+    --opt "adamw" \
     --no_auto_resume \
     --is_experiment \
     --weights \
