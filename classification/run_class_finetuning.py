@@ -591,7 +591,8 @@ def main(args, ds_init):
         print(f"Creating SkinEHDLF_Hybrid model with {args.nb_classes} classes...")
         model = skin_ehdlf_hybrid(
             num_classes=args.nb_classes,
-            pretrained=True  # Assuming you want pretrained backbones
+            pretrained=True,  # Assuming you want pretrained backbones
+            drop_rate=args.drop,
         )
         print(model)
         # SkinEHDLF is a hybrid (ConvNext/EffNet/Swin) and does not have a single 'patch_embed'.
