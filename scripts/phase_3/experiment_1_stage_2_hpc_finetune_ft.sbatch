@@ -37,7 +37,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -55,7 +55,7 @@ WEIGHT_DECAY=0.0         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
 # MIXUP=0.0                 #
-MIXUP=0.8                 #
+MIXUP=0.5                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
 CUTMIX=0.0                
@@ -65,7 +65,7 @@ MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICL
 
 aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
 
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
@@ -149,8 +149,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 5.0 
+    --no_class_weights
     # --sq_root_loss \
     # --weights \
     # --focal_loss \

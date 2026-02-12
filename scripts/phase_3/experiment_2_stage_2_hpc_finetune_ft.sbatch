@@ -54,7 +54,8 @@ WEIGHT_DECAY=0.0         #
 # WEIGHT_DECAY=0.2         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
-MIXUP=0.0                 #
+MIXUP=0.2                 #
+# MIXUP=0.0                 #
 # MIXUP=0.8                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
@@ -151,6 +152,7 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --custom_majority_alpha 1.0 \
     --custom_minority_alpha 2.0 
+    # --no_class_weights
     # --sq_root_loss \
     # --weights \
     # --focal_loss \
