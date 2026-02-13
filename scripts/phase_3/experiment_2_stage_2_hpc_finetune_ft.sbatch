@@ -36,8 +36,8 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
-# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=2e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=1e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -46,7 +46,8 @@ LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=5           #
 EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
-LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
+LAYER_DECAY=0.75          # Moderate layer decay to prevent large updates to pretrained weights in early layers while allowing some fine-tuning
+# LAYER_DECAY=1.00         
 DROP_PATH=0.2             #
 # DROP_PATH=0.3             #
 WEIGHT_DECAY=0.0         #
@@ -54,9 +55,8 @@ WEIGHT_DECAY=0.0         #
 # WEIGHT_DECAY=0.2         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
-MIXUP=0.2                 #
 # MIXUP=0.0                 #
-# MIXUP=0.8                 #
+MIXUP=0.5                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
 CUTMIX=0.0                
@@ -150,9 +150,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 2.0 
-    # --no_class_weights
+    --no_class_weights
     # --sq_root_loss \
     # --weights \
     # --focal_loss \
