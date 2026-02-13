@@ -150,11 +150,11 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
-    --no_class_weights
+    --no_class_weights \
+    --focal_loss \
+    --focal_loss_gamma 2.0
     # --sq_root_loss \
     # --weights \
-    # --focal_loss \
-    # --focal_loss_gamma 2.0 \
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \

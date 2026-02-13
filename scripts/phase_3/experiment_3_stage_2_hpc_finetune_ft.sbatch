@@ -149,7 +149,8 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
-    --no_class_weights
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 1.5 
     # --sq_root_loss \
     # --weights \
     # --focal_loss \
