@@ -57,6 +57,23 @@ from scipy import interpolate
 from sklearn.metrics import precision_recall_curve # <--- +++ ADDED THIS IMPORT
 from models.skin_ehdlf import skin_ehdlf_hybrid
 
+# --- CUSTOM LAYER DECAY LOGIC FOR SKINEHDLF ---
+def get_num_layer_for_skin_ehdlf(var_name, num_max_layer):
+    """
+    Splits SkinEHDLF into two groups:
+    1. Head/Fusion -> Highest Index (Base LR)
+    2. Backbones -> Lowest Index (Decayed LR)
+    """
+    if "classifier" in var_name or "fusion_layer" in var_name:
+        return num_max_layer - 1
+    else:
+        return 0
+
+class SkinEHDLFLayerDecayValueAssigner(LayerDecayValueAssigner):
+    def get_layer_id(self, var_name):
+        return get_num_layer_for_skin_ehdlf(var_name, len(self.values))
+# ----------------------------------------------
+
 def get_args():
     parser = argparse.ArgumentParser('fine-tuning and evaluation script for image classification', add_help=False)
     parser.add_argument('--mode', default='train', type=str)
@@ -890,7 +907,18 @@ def main(args, ds_init):
 
     num_layers = model_without_ddp.get_num_layers()
     if args.layer_decay < 1.0:
-        assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
+        if args.is_skinehdlf:
+            # Special handling for SkinEHDLF hybrid model
+            # We enforce a fake depth of 7 to get roughly 0.1x decay at the bottom (0.75^8 ~= 0.1)
+            # Layer 0: Backbone (0.1x LR)
+            # Layer Max: Head (1.0x LR)
+            fake_num_layers = 7
+            assigner = SkinEHDLFLayerDecayValueAssigner(
+                list(args.layer_decay ** (fake_num_layers + 1 - i) for i in range(fake_num_layers + 2))
+            )
+            print(f"Using SkinEHDLF Layer Decay with {fake_num_layers} virtual layers.")
+        else:
+            assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
     else:
         assigner = None
 

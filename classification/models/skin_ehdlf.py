@@ -56,7 +56,7 @@ class SkinEHDLF(nn.Module):
     with Adaptive Feature Fusion.
     """
     # --- MODIFICATION: Added drop_rate argument to init ---
-    def __init__(self, num_classes=2, pretrained=True, drop_rate=0.3, **kwargs):
+    def __init__(self, num_classes=2, pretrained=True, drop_rate=0.3, num_layers=6, **kwargs):
         super().__init__()
         
         # 1. Define Backbones (Feature Extractors) using timm
@@ -107,7 +107,7 @@ class SkinEHDLF(nn.Module):
         input_dim = self.fusion_dim # Starts at 1024
         
         # Create 5 hidden layers
-        for i in range(5):
+        for i in range(num_layers - 1): # 5 hidden layers + 1 output layer = 6 total
             layers.append(nn.Linear(input_dim, 1024))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(drop_rate)) # Uses the drop_rate passed from arguments
