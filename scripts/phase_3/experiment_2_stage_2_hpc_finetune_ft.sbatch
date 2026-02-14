@@ -50,16 +50,17 @@ LAYER_DECAY=0.75          # Moderate layer decay to prevent large updates to pre
 # LAYER_DECAY=1.00         
 DROP_PATH=0.2             #
 # DROP_PATH=0.3             #
-WEIGHT_DECAY=0.0         #
-# WEIGHT_DECAY=0.05         #
+# WEIGHT_DECAY=0.0         #
+WEIGHT_DECAY=0.05         #
 # WEIGHT_DECAY=0.2         #
 # NOTE - Disabling mixup and cutmix for now
 # CUTMIX=0.0                #
 # MIXUP=0.0                 #
-MIXUP=0.5                 #
-# CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+# MIXUP=0.5                 #
+MIXUP=0.8                 #
+CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
-CUTMIX=0.0                
+# CUTMIX=0.0                
 SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
@@ -146,7 +147,7 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --opt "adam" \
+    --opt "adamw" \
     --no_auto_resume \
     --is_experiment \
     --weights \

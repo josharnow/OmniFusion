@@ -150,7 +150,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_class_weights \
     --resume "${FOLD_OUTPUT_DIR}/checkpoint-best.pth" \
     --TTA \
-    --eval_threshold 0.4 \
+    --eval_threshold 0.5 \
     --eval # This flag forces evaluation ONLY
     # --custom_majority_alpha 1.0 \
     # --custom_minority_alpha 5.0
