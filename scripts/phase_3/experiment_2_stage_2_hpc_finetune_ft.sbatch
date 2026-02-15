@@ -36,15 +36,15 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
-LEARNING_RATE=2e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=2e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
-WARMUP_EPOCHS=5           #
+WARMUP_EPOCHS=10           #
 EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=0.75          # Moderate layer decay to prevent large updates to pretrained weights in early layers while allowing some fine-tuning
 # LAYER_DECAY=1.00         
@@ -67,7 +67,7 @@ MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICL
 
 aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
 
-DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
@@ -153,7 +153,7 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --no_class_weights \
     --focal_loss \
-    --focal_loss_gamma 2.0
+    --focal_loss_gamma 1.0
     # --sq_root_loss \
     # --weights \
     # --TTA \
