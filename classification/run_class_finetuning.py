@@ -9,6 +9,8 @@ except AttributeError:
 
 from dotenv import load_dotenv
 
+from scripts.phase_3.utils.phase_3_preprocessing_online import AdvancedSkinProcessing
+
 # --- ADD THIS DEBUGGING BLOCK AT THE VERY TOP ---
 import torch
 import sys
@@ -307,6 +309,9 @@ def get_args():
     
     parser.add_argument('--is_experiment', action='store_true', default=False,
                         help='Designates as experimental run')
+
+    parser.add_argument('--enable_online_preprocessing', action='store_true', default=False,
+                    help='Enable online preprocessing with AdvancedSkinProcessing. If disabled, assumes offline preprocessing has been done or preprocessing should not be used')
     
 
 
@@ -401,7 +406,7 @@ def main(args, ds_init):
 
     if not args.is_skinehdlf:
         train_trans = [
-            transforms.Resize(256),
+            transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
             transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
@@ -412,7 +417,7 @@ def main(args, ds_init):
         ]
     else:
         train_trans = [
-            transforms.Resize(256),
+            transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
             transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)), # Scaling/Cropping
             transforms.RandomHorizontalFlip(p=0.5), # Flipping
             transforms.RandomVerticalFlip(p=0.5),   # Flipping
@@ -424,17 +429,23 @@ def main(args, ds_init):
             normalize
         ]
 
-    val_trans = [transforms.Resize(256),
-                 transforms.CenterCrop(args.input_size),
-                 transforms.ToTensor(),
-                 normalize]
+    val_trans = [
+        transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
+        # AdvancedSkinProcessing(size=(256, 256)), # NOTE - USED FOR ONLINE PREPROCESSING (IF PREPROCESSING IS DONE OFFLINE, COMMENT THIS OUT)
+        transforms.CenterCrop(args.input_size),
+        transforms.ToTensor(),
+        normalize
+    ]
     
     # --- ADD THIS ---
     # Define TTA test transforms: Resize, Crop, ToTensor, but NO normalization
     # The TTAHandler will apply its own normalization.
-    test_trans_tta = [transforms.Resize(256),
-                      transforms.CenterCrop(args.input_size),
-                      transforms.ToTensor()]
+    test_trans_tta = [
+        transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
+        # AdvancedSkinProcessing(size=(256, 256)), # NOTE - USED FOR ONLINE PREPROCESSING (IF PREPROCESSING IS DONE OFFLINE, COMMENT THIS OUT)
+        transforms.CenterCrop(args.input_size),
+        transforms.ToTensor()
+    ]
     # --- END ADD ---
 
     data_transforms = {
