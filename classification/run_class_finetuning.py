@@ -9,7 +9,7 @@ except AttributeError:
 
 from dotenv import load_dotenv
 
-from scripts.phase_3.utils.phase_3_preprocessing_online import AdvancedSkinProcessing
+from preprocessing_online import AdvancedSkinProcessing
 
 # --- ADD THIS DEBUGGING BLOCK AT THE VERY TOP ---
 import torch
