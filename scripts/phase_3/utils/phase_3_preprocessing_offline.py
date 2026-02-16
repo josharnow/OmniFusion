@@ -8,48 +8,46 @@ from tqdm import tqdm
 # --- CONFIGURATION ---
 SOURCE_DIR = "/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/images/"
 DEST_DIR = "/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/preprocessed_images"
+TARGET_SIZE = (256, 256)
 
 class AdvancedSkinProcessing:
-    """
-    Implements specific dermatological image preprocessing steps:
-    1. Artifact Removal (DullRazor algorithm for hair removal)
-    2. Noise Reduction (Median Blurring)
-    3. Contrast Enhancement (CLAHE in LAB color space)
-    """
-    
     def __init__(self):
-        # Kernel for hair removal (Black-Hat transform)
-        self.hair_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 17))
-        # CLAHE object for contrast enhancement
+        # Hair Removal Kernel (11x11 for 256px images)
+        self.hair_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
+        
+        # CLAHE object
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        # Kernel size for Median Blur
-        self.noise_kernel = 5
+        
+        # Bilateral Filter Settings (The "Optimization")
+        # d=9: Diameter of each pixel neighborhood (9 is standard for noise removal)
+        # sigmaColor=75: Mix pixels if colors are close (keeps edges sharp)
+        # sigmaSpace=75: Mix pixels if they are close spatially
+        self.bi_d = 9
+        self.bi_sigmaColor = 75
+        self.bi_sigmaSpace = 75
 
     def process(self, img_bgr: np.ndarray) -> np.ndarray:
-        """
-        Runs the full pipeline on a single BGR image (OpenCV standard).
-        Returns a BGR image ready for saving.
-        """
-        # 1. Convert BGR -> RGB (Algorithms work best in RGB/Gray)
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        # 1. Resize
+        img_resized = cv2.resize(img_bgr, TARGET_SIZE, interpolation=cv2.INTER_CUBIC)
+        img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
         
-        # 2. Artifact Removal (Hair)
+        # 2. Artifact (Hair) Removal
         gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
         blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, self.hair_kernel)
         _, mask = cv2.threshold(blackhat, 10, 255, cv2.THRESH_BINARY)
         img_clean = cv2.inpaint(img_rgb, mask, 1, cv2.INPAINT_TELEA)
         
-        # 3. Noise Reduction (Median Blur)
-        img_smooth = cv2.medianBlur(img_clean, self.noise_kernel)
+        # 3. Noise Reduction -> CHANGED TO BILATERAL FILTER
+        # Replaces cv2.medianBlur(img_clean, 3)
+        img_smooth = cv2.bilateralFilter(img_clean, self.bi_d, self.bi_sigmaColor, self.bi_sigmaSpace)
         
-        # 4. Contrast Enhancement (CLAHE on L-channel of LAB)
+        # 4. Contrast Enhancement (CLAHE on LAB)
         lab = cv2.cvtColor(img_smooth, cv2.COLOR_RGB2LAB)
         l, a, b = cv2.split(lab)
         l_enhanced = self.clahe.apply(l)
         lab_enhanced = cv2.merge((l_enhanced, a, b))
         img_final_rgb = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2RGB)
         
-        # 5. Convert RGB -> BGR for saving
         return cv2.cvtColor(img_final_rgb, cv2.COLOR_RGB2BGR)
 
 def process_single_file(file_path):
@@ -89,12 +87,11 @@ def main():
     valid_exts = ('*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff')
     image_paths = []
     for ext in valid_exts:
-        # Use recursive=True if your images are in subfolders, 
-        # but for this specific path, flat search is likely what you want.
         image_paths.extend(glob.glob(os.path.join(SOURCE_DIR, ext)))
     
     total_files = len(image_paths)
-    print(f"Found {total_files} images in {SOURCE_DIR}")
+    print(f"Found {total_files} images.")
+    print(f"Processing Target Size: {TARGET_SIZE}")
     
     if total_files == 0:
         print("No images found. Check your source path.")
@@ -102,7 +99,6 @@ def main():
 
     # 3. Process in Parallel
     # Using ProcessPoolExecutor to speed up CPU-bound image processing
-    # Adjust max_workers based on your CPU cores (e.g., 4, 8, or os.cpu_count())
     max_workers = min(32, os.cpu_count() + 4) 
     
     print(f"Starting processing with {max_workers} workers...")
