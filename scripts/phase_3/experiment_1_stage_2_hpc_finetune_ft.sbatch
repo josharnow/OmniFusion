@@ -40,11 +40,11 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
-LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
-WARMUP_EPOCHS=7           #
+WARMUP_EPOCHS=5           #
 EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.2             #
@@ -150,9 +150,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
-    --no_class_weights \
-    --focal_loss \
-    --focal_loss_gamma 2.0 
+    --no_class_weights
     # --sq_root_loss \
     # --weights \
     # --TTA \
