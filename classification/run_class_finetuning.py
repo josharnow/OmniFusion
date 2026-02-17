@@ -1013,7 +1013,12 @@ def main(args, ds_init):
                     pos_weight_val = min(pos_weight_val, args.weight_cap)
                     
                 pos_weight_tensor = torch.tensor(pos_weight_val, device=device)
-            print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: {pos_weight_val:.4f if pos_weight_tensor else 'None'}")
+
+            if pos_weight_tensor:
+                print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: {pos_weight_val:.4f}")
+            else:
+                print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: None")
+
             
             # BCEWithLogitsLoss combines Sigmoid + Weighted BCELoss
             # Note: This expects targets to be float, which we handle in the training loop
