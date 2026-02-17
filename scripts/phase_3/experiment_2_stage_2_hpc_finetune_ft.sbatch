@@ -42,7 +42,7 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
-LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=7           #
 EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
@@ -67,7 +67,7 @@ MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICL
 
 aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
 
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
@@ -151,9 +151,9 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
-    --no_class_weights \
-    --focal_loss \
-    --focal_loss_gamma 1.0
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 1.25 
+
     # --sq_root_loss \
     # --weights \
     # --TTA \
