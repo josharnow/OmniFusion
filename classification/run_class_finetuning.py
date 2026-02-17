@@ -66,7 +66,7 @@ def get_num_layer_for_skin_ehdlf(var_name, num_max_layer):
     1. Head/Fusion -> Highest Index (Base LR)
     2. Backbones -> Lowest Index (Decayed LR)
     """
-    if "classifier" in var_name or "fusion_layer" in var_name:
+    if "classifier" in var_name or "fusion_layer" in var_name or "features_head" in var_name or "final_fc" in var_name:
         return num_max_layer - 1
     else:
         return 0
@@ -885,7 +885,7 @@ def main(args, ds_init):
     if args.freeze_backbone:
         print("Info: Enabling Linear Eval. Freezing backbone weights...")
         for name, param in model.named_parameters():
-            if 'head' not in name and 'classifier' not in name and 'fusion_layer' not in name: # Keep the classifier head unfrozen
+            if 'head' not in name and 'classifier' not in name and 'fusion_layer' not in name and 'features_head' not in name and 'final_fc' not in name:
                 param.requires_grad = False
             else:
                 print(f"Keeping {name} unfrozen.")
@@ -990,37 +990,65 @@ def main(args, ds_init):
         total_samples = sum(label_counts)
 
         # Applies a weight cap to avoid extremely high weights, which could destabilize training
-        weight_cap = args.weight_cap # This can be adjusted based on experimentation (e.g., 100.0, 200.0, etc.)
+        weight_cap = args.weight_cap 
 
-        class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
-        
-        # --- FIX: Use square root of inverse frequency to soften extreme weights ---
-        # class_weights_list = [(total_samples / (len(label_counts) * count))**0.5 for count in label_counts]
-
-        class_weights = torch.tensor(class_weights_list if (not args.custom_majority_alpha or not args.custom_minority_alpha) else [args.custom_majority_alpha, args.custom_minority_alpha], device=device)
-        # print("Using Class Weights for Loss:", class_weights)
-
-        if mixup_fn is not None:
-            # smoothing is handled with mixup label transform
-            if not args.no_class_weights:
-                print("Using Weighted Cross Entropy for Mixup with weights:", class_weights)
-                # PyTorch CrossEntropyLoss handles Soft Targets (N, C) automatically
-                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
-            else:
-                criterion = SoftTargetCrossEntropy()
-        elif args.smoothing > 0.:
-            criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-        elif args.focal_loss:
-            if not args.no_class_weights:
-                print("Using Focal Loss with Class Weights:", class_weights)
-            criterion = FocalLoss(gamma=args.focal_loss_gamma, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
+        # --- FIX: Match SkinEHDLF "Cross-Weighted Loss" + Sigmoid ---
+        if args.is_skinehdlf and args.nb_classes == 2:
+            # For Binary (Sigmoid), "Cross-Weighted" means weighting the Positive class 
+            # to balance the loss contribution.
+            # Formula: pos_weight = Number_Negative / Number_Positive
+            
+            pos_weight_tensor = None
+            if not args.no_class_weights: # Only calculate pos_weight if class weights are enabled
+                if args.custom_majority_alpha and args.custom_minority_alpha:
+                    n_neg = args.custom_majority_alpha # For skin cancer datasets, benign (negative class) is typically the majority
+                    n_pos = args.custom_minority_alpha # For skin cancer datasets, malignant (positive class) is typically the minority
+                else:
+                    n_neg = label_counts[0]
+                    n_pos = label_counts[1]
+                pos_weight_val = n_neg / n_pos
+                
+                # Cap the weight if needed (to prevent instability if imbalance is extreme)
+                if args.weight_cap is not None:
+                    pos_weight_val = min(pos_weight_val, args.weight_cap)
+                    
+                pos_weight_tensor = torch.tensor(pos_weight_val, device=device)
+            print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: {pos_weight_val:.4f if pos_weight_tensor else 'None'}")
+            
+            # BCEWithLogitsLoss combines Sigmoid + Weighted BCELoss
+            # Note: This expects targets to be float, which we handle in the training loop
+            criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+            
         else:
-            # Apply the calculated class weights here
-            if not args.no_class_weights:
-                print("Using Class Weights for Loss:", class_weights)
-            # NOTE - This might be the best way to address imbalanced datasets
-            criterion = torch.nn.CrossEntropyLoss(weight=class_weights if not args.no_class_weights else None)
+            # Multi-class Fallback (Softmax + Class Weights) [or PanDerm]
+            class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
 
+            # --- FIX: Use square root of inverse frequency to soften extreme weights ---
+            # class_weights_list = [(total_samples / (len(label_counts) * count))**0.5 for count in label_counts]
+
+            class_weights = torch.tensor(class_weights_list if (not args.custom_majority_alpha or not args.custom_minority_alpha) else [args.custom_majority_alpha, args.custom_minority_alpha], device=device)
+            # print("Using Class Weights for Loss:", class_weights)
+
+            if mixup_fn is not None:
+                # smoothing is handled with mixup label transform
+                if not args.no_class_weights:
+                    print("Using Weighted Cross Entropy for Mixup with weights:", class_weights)
+                    # PyTorch CrossEntropyLoss handles Soft Targets (N, C) automatically
+                    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+                else:
+                    criterion = SoftTargetCrossEntropy()
+            elif args.smoothing > 0.:
+                criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+            elif args.focal_loss:
+                if not args.no_class_weights:
+                    print("Using Focal Loss with Class Weights:", class_weights)
+                criterion = FocalLoss(gamma=args.focal_loss_gamma, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
+            else:
+                # Apply the calculated class weights here
+                if not args.no_class_weights:
+                    print("Using Class Weights for Loss:", class_weights)
+                # NOTE - This might be the best way to address imbalanced datasets
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights if not args.no_class_weights else None)
 
         print("criterion = %s" % str(criterion))
 
@@ -1045,14 +1073,20 @@ def main(args, ds_init):
             # The 'evaluate' function now returns metrics, wandb_res, prediction_array, true_label_decode_array
             _, _, val_probs, val_labels = evaluate(
                 data_loader_val, model, device, args.output_dir, epoch, 
-                mode='val_tune', num_class=args.nb_classes, decision_threshold=None
+                mode='val_tune', num_class=args.nb_classes, decision_threshold=None, is_skinehdlf=args.is_skinehdlf
             )
 
             # --- (UNIFIED) STEP 2: Calculate best threshold (Targeting a Specific Recall) ---
             TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
             print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
             
+            # Handle binary case specifically for threshold finding
+            # if args.nb_classes == 2:
             val_probs_positive = val_probs[:, 1]
+            # else:
+            #     # Fallback for multi-class (conceptually trickier, assumes class 1 is positive)
+            #     val_probs_positive = val_probs[:, 1]
+
             precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
 
             try:
@@ -1096,14 +1130,16 @@ def main(args, ds_init):
             test_stats, _, _, _ = evaluate_tta(
                 data_loader_test, model, device, args.output_dir, epoch,
                 mode='test', num_class=args.nb_classes,
-                decision_threshold=best_threshold # <-- Pass tuned threshold
+                decision_threshold=best_threshold, # <-- Pass tuned threshold
+                is_skinehdlf=args.is_skinehdlf
             )
         else:
             print(f"Starting TEST evaluation without TTA (using threshold={best_threshold:.4f})")
             test_stats, wandb_test, _, _ = evaluate(
                 data_loader_test, model, device, args.output_dir, epoch, 
                 mode='test', num_class=args.nb_classes,
-                decision_threshold=best_threshold # <-- Pass tuned threshold
+                decision_threshold=best_threshold, # <-- Pass tuned threshold
+                is_skinehdlf=args.is_skinehdlf
             )
             print("Logging final test metrics (with tuned threshold) to wandb...")
             wandb.log(wandb_test)
@@ -1143,7 +1179,8 @@ def main(args, ds_init):
         # Note: evaluate() now returns: metrics, wandb_res, prediction_array, true_label_decode_array
         val_stats, wandb_res, _, _ = evaluate(
             data_loader_val, model, device, args.output_dir, epoch, mode='val',
-            num_class=args.nb_classes, decision_threshold=None # Use default threshold for epoch-to-epoch saving
+            num_class=args.nb_classes, decision_threshold=None, # Use default threshold for epoch-to-epoch saving
+            is_skinehdlf=args.is_skinehdlf
         )
         print('--------------------------',wandb_res)
         val_bacc, val_acc, val_auc_roc, valwf1, val_mean_recall = wandb_res['Val BAcc'], wandb_res['Val Acc'] , wandb_res['Val ROC'], \
@@ -1225,14 +1262,19 @@ def main(args, ds_init):
                 print("Running on validation set to find best threshold...")
                 _, _, val_probs, val_labels = evaluate(
                     data_loader_val, model, device, args.output_dir, epoch, 
-                    mode='val_tune', num_class=args.nb_classes, decision_threshold=None
+                    mode='val_tune', num_class=args.nb_classes, decision_threshold=None, is_skinehdlf=args.is_skinehdlf
                 )
 
                 # --- STEP 3: Calculate best threshold (Targeting a Specific Recall) ---
                 TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
                 print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
                 
+                # Handle binary case
+                # if args.nb_classes == 2:
                 val_probs_positive = val_probs[:, 1]
+                # else:
+                #     val_probs_positive = val_probs[:, 1]
+                    
                 precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
 
                 try:
@@ -1271,14 +1313,16 @@ def main(args, ds_init):
                 test_stats, _, _, _ = evaluate_tta(
                     data_loader_test, model, device, args.output_dir, epoch,
                     mode='test', num_class=args.nb_classes,
-                    decision_threshold=best_threshold # <-- Pass tuned threshold
+                    decision_threshold=best_threshold, # <-- Pass tuned threshold
+                    is_skinehdlf=args.is_skinehdlf
                 )
             else:
                 print(f"Starting test without TTA (using threshold={best_threshold:.4f})")
                 test_stats, wandb_test, _, _ = evaluate(
                     data_loader_test, model, device, args.output_dir, epoch, 
                     mode='test', num_class=args.nb_classes,
-                    decision_threshold=best_threshold # <-- Pass tuned threshold
+                    decision_threshold=best_threshold, # <-- Pass tuned threshold
+                    is_skinehdlf=args.is_skinehdlf
                 )
                 print("Logging final test metrics (with tuned threshold) to wandb...")
                 wandb.log(wandb_test)

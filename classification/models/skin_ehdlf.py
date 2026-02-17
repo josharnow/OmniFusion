@@ -55,13 +55,11 @@ class SkinEHDLF(nn.Module):
     Hybrid model combining ConvNeXt, EfficientNetV2, and Swin Transformer
     with Adaptive Feature Fusion.
     """
-    # --- MODIFICATION: Added drop_rate argument to init ---
     def __init__(self, num_classes=2, pretrained=True, drop_rate=0.3, num_layers=6, **kwargs):
         super().__init__()
         
         # 1. Define Backbones (Feature Extractors) using timm
-        # We set num_classes=0 to get the feature vector (pooling is usually included by default in timm forward_features + pooling, 
-        # or we can grab the representation before the head)
+        # We set num_classes=0 to get the feature vector
         
         # 1. ConvNeXt Base (Facebook 22k pretrain -> 1k finetune)
         self.convnext = timm.create_model(
@@ -99,8 +97,6 @@ class SkinEHDLF(nn.Module):
         
         # 3. Classification Head (Deep Dense Stack)
         # MODIFIED: Implemented the 6-layer Dense Head described in Table 7 of the SkinEHDLF paper.
-        # This consists of 5 hidden layers (1024 units) and 1 output layer.
-        
         print(f"Building 6-layer head with Dropout Rate: {drop_rate}")
 
         layers = []
@@ -110,33 +106,33 @@ class SkinEHDLF(nn.Module):
         for i in range(num_layers - 1): # 5 hidden layers + 1 output layer = 6 total
             layers.append(nn.Linear(input_dim, 1024))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(drop_rate)) # Uses the drop_rate passed from arguments
+            layers.append(nn.Dropout(drop_rate)) 
             input_dim = 1024 # Next layer input is 1024
             
-        # Final Output Layer (6th layer)
-        layers.append(nn.Linear(input_dim, num_classes))
-        
-        self.classifier = nn.Sequential(*layers)
+        self.features_head = nn.Sequential(*layers)
 
+        # Final Output Layer (6th layer)
+        # FIX: If num_classes is 2 (Binary), we output 1 neuron (Sigmoid).
+        # If num_classes > 2 (Multi-class), we output N neurons (Softmax).
+        if num_classes == 2:
+            print("SkinEHDLF Binary Mode: Outputting 1 neuron (Sigmoid formulation).")
+            self.final_fc = nn.Linear(input_dim, 1)
+        else:
+            print(f"SkinEHDLF Multi-class Mode: Outputting {num_classes} neurons (Softmax formulation).")
+            self.final_fc = nn.Linear(input_dim, num_classes)
+            
         # --- FIX: Add this attribute to prevent the crash in main() ---
         self.use_rel_pos_bias = False
 
     # --- FIX: Add this method for the optimizer (weight decay) ---
     def no_weight_decay(self):
-        # This model relies on backbones that handle their own decay, 
-        # or we can return an empty set to apply decay everywhere by default.
         return {}
 
     # --- FIX: Add this method for the scheduler (layer decay) ---
     def get_num_layers(self):
-        # The training script uses this for layer-wise learning rate decay.
-        # Since this is a hybrid model, we return 1 and will disable 
-        # layer decay in the arguments.
         return 1
     
     def forward_features(self, x, **kwargs):
-        # We accept 'is_train' via kwargs to satisfy the caller, but we don't use it. The model's internal mode (self.training) handles the behavior.
-        # This works because 'self.convnext' exists in this class!
         f_convnext = self.convnext(x)
         f_efficient = self.efficientnet(x)
         f_swin = self.swin(x)
@@ -145,9 +141,9 @@ class SkinEHDLF(nn.Module):
         return self.fusion_layer(f_convnext, f_efficient, f_swin)
 
     def forward(self, x):
-        # This standard pipeline pattern now works perfectly
         x = self.forward_features(x)
-        x = self.classifier(x)
+        x = self.features_head(x)
+        x = self.final_fc(x)
         return x
 
 # Factory function for builder

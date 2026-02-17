@@ -74,14 +74,10 @@ def misc_measures(confusion_matrix):
     mcc_ = np.array(mcc_).mean()
 
     return bacc, sensitivity, specificity, precision, G, F1_score_2, mcc_
+
 def train_class_batch(model, samples, target, criterion):
     outputs = model(samples)
-    # --- ADD THIS CHECK ---
-    # print_tensor_stats(outputs, name="Model Output (logits)")
-    # --- END CHECK ---
     loss = criterion(outputs, target)
-    # print_tensor_stats(loss, name="Calculated Loss")
-    # print(flush=True)
     return loss, outputs
 
 
@@ -100,9 +96,6 @@ def train_full_precision(
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None
 ):
-    # *** --- START: Full Precision (FP32) Training Logic --- ***
-    # The autocast and loss_scaler logic has been removed.
-    
     # Forward pass
     loss, output = train_class_batch(model, samples, targets, criterion)
     loss_value = loss.item()
@@ -128,7 +121,6 @@ def train_full_precision(
             model_ema.update(model)
     
     loss_scale_value = 1.0 # Not using loss scaler in FP32
-    # *** --- END: Full Precision (FP32) Training Logic *** ---
     return loss_value, output, loss_scale_value, grad_norm
 
 def train_amp(
@@ -164,14 +156,11 @@ def train_amp(
         model.step()
 
         if (data_iter_step + 1) % update_freq == 0:
-            # model.zero_grad()
-            # Deepspeed will call step() & model.zero_grad() automatic
             if model_ema is not None:
                 model_ema.update(model)
         grad_norm = None
         loss_scale_value = get_loss_scale_for_deepspeed(model)
     else:
-        # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         loss /= update_freq
         grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
@@ -205,6 +194,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     else:
         print("Training with Automatic Mixed Precision (AMP).")
 
+    # --- CHECK: SkinEHDLF + Binary Mode ---
+    is_skinehdlf_binary = False
+    if args is not None:
+        if hasattr(args, 'is_skinehdlf') and hasattr(args, 'nb_classes'):
+            is_skinehdlf_binary = args.is_skinehdlf and (args.nb_classes == 2)
+
     for data_iter_step, (samples, _, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
@@ -227,6 +222,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
+        # --- FIX: Ensure targets are float if using BCE (SkinEHDLF Binary) ---
+        if is_skinehdlf_binary:
+            if targets.dtype != torch.float32 and targets.dtype != torch.float16:
+                targets = targets.float().view(-1, 1) # Ensure [B, 1] for binary BCE
+            elif targets.dim() == 1:
+                targets = targets.view(-1, 1)
+
         if args and args.disable_amp:
             loss_value, output, loss_scale_value, grad_norm = train_full_precision(
                 model, samples, targets, criterion, optimizer,
@@ -240,26 +242,35 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         torch.cuda.synchronize()
 
         if mixup_fn is None:
-            # --- START: MODIFIED METRICS ---
-            preds = output.max(-1)[-1]
-            class_acc = (preds == targets).float().mean()
-            
-            # Calculate Sensitivity (Recall Class 1) and Specificity (Recall Class 0)
-            # Note: This assumes Binary Classification where 1=Cancer, 0=Benign
-            
-            # True Positives: Predicted 1, Actual 1
-            tp = ((preds == 1) & (targets == 1)).sum().float()
-            # False Negatives: Predicted 0, Actual 1
-            fn = ((preds == 0) & (targets == 1)).sum().float()
-            # True Negatives: Predicted 0, Actual 0
-            tn = ((preds == 0) & (targets == 0)).sum().float()
-            # False Positives: Predicted 1, Actual 0
-            fp = ((preds == 1) & (targets == 0)).sum().float()
+            # --- START: METRIC LOGIC ---
+            if is_skinehdlf_binary:
+                # Sigmoid Logic
+                probs = torch.sigmoid(output).squeeze()
+                preds = (probs > 0.5).float()
+                
+                # Targets are float [B, 1], flatten for comparison
+                targets_flat = targets.squeeze()
+                
+                class_acc = (preds == targets_flat).float().mean()
+                
+                tp = ((preds == 1) & (targets_flat == 1)).sum().float()
+                fn = ((preds == 0) & (targets_flat == 1)).sum().float()
+                tn = ((preds == 0) & (targets_flat == 0)).sum().float()
+                fp = ((preds == 1) & (targets_flat == 0)).sum().float()
+            else:
+                # Softmax/Argmax Logic (Standard)
+                preds = output.max(-1)[-1]
+                class_acc = (preds == targets).float().mean()
+                
+                # Assuming class 1 is positive, 0 is negative
+                tp = ((preds == 1) & (targets == 1)).sum().float()
+                fn = ((preds == 0) & (targets == 1)).sum().float()
+                tn = ((preds == 0) & (targets == 0)).sum().float()
+                fp = ((preds == 1) & (targets == 0)).sum().float()
 
-            # Add epsilon to avoid divide-by-zero if a batch is missing a class (unlikely with sampler)
             sens = tp / (tp + fn + 1e-8)
             spec = tn / (tn + fp + 1e-8)
-            # --- END: MODIFIED METRICS ---
+            # --- END: METRIC LOGIC ---
         else:
             class_acc = None
             sens = None
@@ -315,7 +326,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def save_predictions_csv(model, data_loader, device, original_csv_path, output_dir, dataset_name):
+def save_predictions_csv(model, data_loader, device, original_csv_path, output_dir, dataset_name, is_skinehdlf=False):
     # Read the original CSV file
     original_df = pd.read_csv(original_csv_path)
 
@@ -336,9 +347,16 @@ def save_predictions_csv(model, data_loader, device, original_csv_path, output_d
             # Compute output
             output = model(images)
 
-            # Get predicted class and probabilities
-            probs = torch.nn.functional.softmax(output, dim=1)
-            _, preds = torch.max(probs, 1)
+            # --- MODIFIED: Basic shape check + Explicit Flag for SkinEHDLF ---
+            if is_skinehdlf and output.shape[1] == 1:
+                 # Likely SkinEHDLF Binary -> Sigmoid
+                 probs_pos = torch.sigmoid(output).squeeze()
+                 preds = (probs_pos > 0.5).long()
+                 probs = torch.stack((1 - probs_pos, probs_pos), dim=1)
+            else:
+                 # Standard -> Softmax
+                 probs = torch.nn.functional.softmax(output, dim=1)
+                 _, preds = torch.max(probs, 1)
 
             # Store results
             for filename, true_label, pred, prob in zip(filenames, targets, preds, probs):
@@ -375,7 +393,8 @@ def save_predictions_csv(model, data_loader, device, original_csv_path, output_d
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decision_threshold=None):
+def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decision_threshold=None, is_skinehdlf=False):
+    # Dummy criterion, not critical here
     criterion = torch.nn.CrossEntropyLoss()
     metric_logger = MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -402,17 +421,28 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         # compute output
         with torch.amp.autocast('cuda'):
             output = model(images)
-            loss = criterion(output, target)
+            # loss = criterion(output, target) # Skip loss calculation to avoid shape mismatches with BCE
 
-        prediction_softmax = nn.Softmax(dim=1)(output)
+        # --- CONDITIONAL OUTPUT LOGIC ---
+        if is_skinehdlf and num_class == 2:
+            # Binary SkinEHDLF (Sigmoid)
+            probs = torch.sigmoid(output).squeeze()
+            # Convert to [B, 2] probability format: [Prob(0), Prob(1)]
+            # 1-p is Benign, p is Malignant
+            prediction_softmax = torch.stack((1 - probs, probs), dim=1)
+        else:
+            # Standard (Softmax)
+            prediction_softmax = nn.Softmax(dim=1)(output)
         
-        # --- MODIFICATION: Only collect labels and raw probabilities ---
-        _, true_label_decode = torch.max(true_label, 1)
+        # Decode targets
+        if true_label.shape[1] == num_class:
+             _, true_label_decode = torch.max(true_label, 1)
+        else:
+             true_label_decode = target
         
         true_label_decode_list.extend(true_label_decode.cpu().detach().numpy())
         true_label_onehot_list.extend(true_label.cpu().detach().numpy())
         prediction_list.extend(prediction_softmax.cpu().detach().numpy())
-        # --- END MODIFICATION ---
 
     # Convert lists to numpy arrays
     true_label_decode_array = np.array(true_label_decode_list) # This is y_true
@@ -421,12 +451,10 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
 
     # --- NEW THRESHOLD LOGIC ---
     if decision_threshold is None:
-        # Default behavior: use argmax (equiv to 0.5 for binary)
-        print(f"[{mode}] Using default argmax (0.5) threshold for metrics.")
+        # Default behavior
         prediction_decode_array = np.argmax(prediction_array, axis=1)
     else:
-        # Use the provided threshold for class 1
-        print(f"[{mode}] Using custom threshold {decision_threshold} for metrics.")
+        # Custom threshold
         positive_probs = prediction_array[:, 1] # Get probs for class 1
         prediction_decode_array = (positive_probs >= decision_threshold).astype(int)
     # --- END NEW LOGIC ---
@@ -446,14 +474,9 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
     specificity_list = []
 
     for idx, cm in enumerate(confusion_matrices):
-        TN = cm[0, 0]
-        FP = cm[0, 1]
-        FN = cm[1, 0]
-        TP = cm[1, 1]
-    
+        TN, FP, FN, TP = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
         sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
         sensitivity_list.append(sensitivity)
-    
         specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
         specificity_list.append(specificity)
 
@@ -466,7 +489,6 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
     bacc = balanced_accuracy_score(true_label_decode_array, prediction_decode_array)
     acc = accuracy_score(true_label_decode_array, prediction_decode_array)
 
-    # --- START OF FIX ---
     # Only calculate top-k accuracy if k is less than the number of classes
     top3_acc = 0.0
     if num_class >= 3:
@@ -475,7 +497,6 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
     top5_acc = 0.0
     if num_class >= 5:
         top5_acc = top_k_accuracy_score(true_label_decode_array, prediction_array, k=5, labels=np.arange(num_class))
-    # --- END OF FIX ---
 
     try:
         auc_roc = roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro')
@@ -483,7 +504,7 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         print("\n" + "="*40)
         print("!!! CAUGHT NAN ERROR DURING VALIDATION !!!")
         print("="*40)
-        
+                
         # 1. Check Predictions for NaNs
         if np.isnan(prediction_array).any():
             nan_count = np.sum(np.isnan(prediction_array))
@@ -513,8 +534,7 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         
         # Re-raise the error so the job stops as expected
         raise e 
-    # ------------------ DEBUGGING BLOCK END ------------------
-
+    
 
     f1 = f1_score(true_label_decode_array, prediction_decode_array, average='weighted')
     recall = recall_score(true_label_decode_array, prediction_decode_array, average='macro')
@@ -568,7 +588,7 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
     if mode == 'val':
         wandb_res = {
             'Epoch': epoch,
-            'Val Loss': loss.item(),
+            'Val Loss': 0.0,
             'Val BAcc': bacc,
             'Val Acc': acc,
             'Val Sens': macro_sensitivity, # Added Sens
@@ -652,7 +672,7 @@ class TTAHandler:
         return torch.stack(augmented_batches, dim=0)
 
 @torch.no_grad()
-def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5, decision_threshold=None):
+def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5, decision_threshold=None, is_skinehdlf=False):
     model.eval()
     criterion = torch.nn.CrossEntropyLoss()
     metric_logger = MetricLogger(delimiter="  ")
@@ -675,27 +695,41 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
 
         predictions = torch.mean(reshaped_outputs, dim=0) # <-- These are logits
 
-        # --- NEW THRESHOLD LOGIC ---
+        # --- CONDITIONAL THRESHOLD LOGIC ---
         logits.extend(predictions.cpu().numpy())
         all_targets.extend(targets.cpu().numpy())
 
         if decision_threshold is None:
-            # Default behavior: use argmax (equiv to 0.5 for binary)
-            print("TTA: Using default argmax (0.5) threshold.")
-            _, predicted = torch.max(predictions, 1)
+            if is_skinehdlf and num_class == 2:
+                 # Default binary Sigmoid: > 0.5 (logit > 0)
+                 print("TTA: Using default Sigmoid > 0.5 threshold.")
+                 predicted = (predictions > 0).long().squeeze()
+            else:
+                 # Default multi-class: argmax
+                 print("TTA: Using default Argmax threshold.")
+                 _, predicted = torch.max(predictions, 1)
             predicted_np = predicted.cpu().numpy()
         else:
-            # Use the provided threshold for class 1
             print(f"TTA: Using custom threshold {decision_threshold}.")
-            # 'predictions' are logits, so apply softmax first
-            positive_probs = torch.softmax(predictions, dim=1)[:, 1]
-            predicted = (positive_probs >= decision_threshold)
+            if is_skinehdlf and num_class == 2:
+                # Binary: Sigmoid -> Threshold
+                probs = torch.sigmoid(predictions).squeeze()
+                predicted = (probs >= decision_threshold)
+            else:
+                # Multi-class: Softmax -> Threshold on class 1
+                positive_probs = torch.softmax(predictions, dim=1)[:, 1]
+                predicted = (positive_probs >= decision_threshold)
             predicted_np = predicted.cpu().numpy().astype(int)
         
         all_preds.extend(predicted_np)
         # --- END NEW LOGIC ---
 
-        probabilities = torch.softmax(predictions, dim=1).cpu().numpy()
+        # Probs for CSV
+        if is_skinehdlf and num_class == 2:
+            probs_pos = torch.sigmoid(predictions).squeeze()
+            probabilities = torch.stack((1-probs_pos, probs_pos), dim=1).cpu().numpy()
+        else:
+            probabilities = torch.softmax(predictions, dim=1).cpu().numpy()
         
         for i, image_name in enumerate(batch_image_list):
             results.append({
