@@ -222,12 +222,20 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        # --- FIX: Ensure targets are float if using BCE (SkinEHDLF Binary) ---
+        # --- FIX: Match Targets to Sigmoid Output (BCE) ---
         if is_skinehdlf_binary:
-            if targets.dtype != torch.float32 and targets.dtype != torch.float16:
-                targets = targets.float().view(-1, 1) # Ensure [B, 1] for binary BCE
+            # Case 1: Mixup/CutMix Active -> Targets are [B, 2] (Softmax format)
+            # We must convert to [B, 1] by taking the Probability of Class 1 (Malignant)
+            if targets.dim() == 2 and targets.shape[1] == 2:
+                targets = targets[:, 1].view(-1, 1)
+            
+            # Case 2: No Mixup -> Targets are [B] (Indices)
             elif targets.dim() == 1:
                 targets = targets.view(-1, 1)
+            
+            # Ensure float type for BCEWithLogitsLoss
+            if targets.dtype != torch.float32 and targets.dtype != torch.float16:
+                targets = targets.float()
 
         if args and args.disable_amp:
             loss_value, output, loss_scale_value, grad_norm = train_full_precision(
