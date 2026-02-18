@@ -41,10 +41,10 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-LEARNING_RATE=5e-5       
+LEARNING_RATE=1e-5       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
-WARMUP_EPOCHS=10           #
+WARMUP_EPOCHS=5           #
 EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
 DROP_PATH=0.2             #
@@ -57,7 +57,7 @@ WEIGHT_DECAY=0.05         #
 # MIXUP=0.0                 #
 # MIXUP=0.5                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
-MIXUP=0.8                 #
+MIXUP=0.5                 #
 CUTMIX=1.0                
 # CUTMIX=0.0                
 SMOOTHING=0.0
@@ -151,7 +151,7 @@ ${PYTHON} run_class_finetuning.py \
     --is_experiment \
     --weights \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 1.25 
+    --custom_minority_alpha 1.75
     # --sq_root_loss \
     # --weights \
     # --TTA \

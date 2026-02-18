@@ -1001,19 +1001,19 @@ def main(args, ds_init):
             pos_weight_tensor = None
             if not args.no_class_weights: # Only calculate pos_weight if class weights are enabled
                 if args.custom_majority_alpha and args.custom_minority_alpha:
-                    # NOTE - This allows users to directly specify the pos_weight via custom alphas, which can be more intuitive. Assumes negative class is majority and positive class is minority; thus, weighting the positive class by the ratio of minority_alpha to majority_alpha.
-                    pos_weight_val = args.custom_minority_alpha / args.custom_majority_alpha
+                    n_neg = args.custom_majority_alpha # For skin cancer datasets, benign (negative class) is typically the majority
+                    n_pos = args.custom_minority_alpha # For skin cancer datasets, malignant (positive class) is typically the minority
                 else:
                     n_neg = label_counts[0]
                     n_pos = label_counts[1]
-                    pos_weight_val = n_neg / n_pos
+                pos_weight_val = n_neg / n_pos
                 
                 # Cap the weight if needed (to prevent instability if imbalance is extreme)
                 if args.weight_cap is not None:
                     pos_weight_val = min(pos_weight_val, args.weight_cap)
                     
                 pos_weight_tensor = torch.tensor(pos_weight_val, device=device)
-
+            
             if pos_weight_tensor:
                 print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: {pos_weight_val:.4f}")
             else:
@@ -1066,7 +1066,46 @@ def main(args, ds_init):
         epoch=0
         model_weight = args.resume
         model_dict = torch.load(model_weight, map_location=device, weights_only=False)
-        model.load_state_dict(model_dict['model'])
+        
+        # --- FIX: REMAP KEYS FOR LEGACY CHECKPOINTS (Evaluation Mode) ---
+        # The user is loading a checkpoint trained with "classifier.*" (old head)
+        # into a model expecting "features_head.*" and "final_fc.*" (new split head).
+        
+        state_dict = model_dict['model']
+        new_state_dict = {}
+        print(">>> Checking for key mismatch in checkpoint... <<<")
+        
+        remapped_count = 0
+        for k, v in state_dict.items():
+            if k.startswith('classifier.'):
+                # We found legacy keys! Remap them.
+                parts = k.split('.')
+                # Structure: classifier.{layer_idx}.{weight/bias}
+                if len(parts) >= 3:
+                    layer_idx = int(parts[1])
+                    suffix = parts[2]
+                    
+                    # Logic: The last layer (15) is the final linear layer -> final_fc
+                    # All previous layers (0, 3, 6, 9, 12) -> features_head
+                    if layer_idx == 15:
+                        new_key = f"final_fc.{suffix}"
+                    else:
+                        new_key = f"features_head.{layer_idx}.{suffix}"
+                    
+                    new_state_dict[new_key] = v
+                    remapped_count += 1
+                else:
+                    # Fallback if structure is weird
+                    new_state_dict[k] = v
+            else:
+                new_state_dict[k] = v
+                
+        if remapped_count > 0:
+            print(f">>> Successfully remapped {remapped_count} keys from 'classifier' to 'features_head/final_fc'.")
+        
+        # Load the (potentially modified) state dict
+        model.load_state_dict(new_state_dict)
+        # ----------------------------------------------------------------
         
         best_threshold = args.eval_threshold  # Default threshold if not tuning
         if args.tune_threshold:
@@ -1355,6 +1394,4 @@ if __name__ == '__main__':
         notes="baselines", \
         config=opts)
     if opts.output_dir:
-        Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
-    main(opts, ds_init)
-    wandb.finish()
+        Path(opts.output_dir
