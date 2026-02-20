@@ -28,7 +28,8 @@ NUM_WORKERS=8
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
 # This path construction is crucial for the job array to work correctly.
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/experiment/fold_1"
-FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
+FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_target.csv"
+# FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_1/fold_data_combined.csv"
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
@@ -118,7 +119,6 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -151,7 +151,8 @@ ${PYTHON} run_class_finetuning.py \
     --is_experiment \
     --weights \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 1.75
+    --custom_minority_alpha 2.0
+    # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
     # --sq_root_loss \
     # --weights \
     # --TTA \
