@@ -1394,4 +1394,6 @@ if __name__ == '__main__':
         notes="baselines", \
         config=opts)
     if opts.output_dir:
-        Path(opts.output_dir
+        Path(opts.output_dir).mkdir(parents=True, exist_ok=True)
+    main(opts, ds_init)
+    wandb.finish()
