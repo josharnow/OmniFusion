@@ -147,9 +147,8 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --no_auto_resume \
-    --sq_root_loss
-    # --custom_majority_alpha 1.0 \
-    # --custom_minority_alpha 5.0
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 7.5
     # --focal_loss \
     # --focal_loss_gamma 2.0 \
     # --TTA \

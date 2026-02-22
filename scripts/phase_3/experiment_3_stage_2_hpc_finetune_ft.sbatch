@@ -149,6 +149,7 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --is_experiment \
     --weights \
+    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-lp.pth" \
     --custom_majority_alpha 1.0 \
     --custom_minority_alpha 1.75 
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \

@@ -774,7 +774,8 @@ def main(args, ds_init):
                 
             # Verify Classifier Head Load
             # We specifically check for the final layer weights of SkinEHDLF
-            head_key = 'classifier.3.weight'
+            # head_key = 'classifier.3.weight'
+            head_key = 'final_fc.weight'
             if head_key in matched_keys:
                 print("✅ CLASSIFIER HEAD FOUND IN CHECKPOINT! Transfer Learning should work.")
             else:
