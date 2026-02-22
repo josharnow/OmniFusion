@@ -18,7 +18,7 @@ MODEL="SkinEHDLF_Hybrid" # Base model to start fine-tuning from
 NB_CLASSES=2
 OUTPUT_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3"
 CSV_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3" # IMPORTANT: Directory containing your fold_data.csv files
-ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/images/" # This is the same as phase 2 since images are unchanged
+ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/preprocessed_images/" # This is the same as phase 2 since images are unchanged
 # Below is the pretrained checkpoint for the ENTIRE PanDerm dataset (DO NOT USE FOR THESIS)
 # PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
 # Below is the pretrained checkpoint for Imagenet, which the authors used for their pretraining prior to training on the entire dataset from their paper (USE FOR THESIS)
@@ -55,10 +55,10 @@ DROP_PATH=0.4             #
 # WEIGHT_DECAY=0.05         #
 WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
-CUTMIX=0.0                #
-MIXUP=0.0                 #
-# MIXUP=0.8                 #
-# CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
+# CUTMIX=0.0                #
+# MIXUP=0.0                 #
+MIXUP=0.8                 #
+CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
 # CUTMIX=0.0                
 SMOOTHING=0.0
