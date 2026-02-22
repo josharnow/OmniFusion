@@ -1001,12 +1001,12 @@ def main(args, ds_init):
             pos_weight_tensor = None
             if not args.no_class_weights: # Only calculate pos_weight if class weights are enabled
                 if args.custom_majority_alpha and args.custom_minority_alpha:
-                    n_neg = args.custom_majority_alpha # For skin cancer datasets, benign (negative class) is typically the majority
-                    n_pos = args.custom_minority_alpha # For skin cancer datasets, malignant (positive class) is typically the minority
+                    # NOTE - Indicating custom_minority_ or _majority_alpha means "I want to set a specific pos_weight ratio instead of calculating it from the data" in the sigmoid function case. Names are consistent with the softmax function case for backwards compatibility
+                    pos_weight_val = args.custom_minority_alpha / args.custom_majority_alpha
                 else:
                     n_neg = label_counts[0]
                     n_pos = label_counts[1]
-                pos_weight_val = n_neg / n_pos
+                    pos_weight_val = n_neg / n_pos
                 
                 # Cap the weight if needed (to prevent instability if imbalance is extreme)
                 if args.weight_cap is not None:
