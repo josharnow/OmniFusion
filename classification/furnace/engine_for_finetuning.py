@@ -660,8 +660,9 @@ class TTAHandler:
 
     def get_inference_transforms(self):
         return transforms.Compose([
-            transforms.Resize(246),
-            transforms.CenterCrop(224),
+            # NOTE - Commented out to prevent image distortion by applying resizing twice
+            # transforms.Resize(246),
+            # transforms.CenterCrop(224),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             transforms.RandomApply([transforms.RandomRotation(degrees=(0, 270))], p=0.3),
