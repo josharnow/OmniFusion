@@ -429,7 +429,6 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         # compute output
         with torch.amp.autocast('cuda'):
             output = model(images)
-            # loss = criterion(output, target) # Skip loss calculation to avoid shape mismatches with BCE
 
         # --- CONDITIONAL OUTPUT LOGIC ---
         if is_skinehdlf and num_class == 2:
@@ -476,23 +475,26 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
             'probabilities': prediction_array[i]
         })
 
-    confusion_matrices = multilabel_confusion_matrix(true_label_decode_array, prediction_decode_array)
-    
-    sensitivity_list = []
-    specificity_list = []
+    # --- FIX: Separated binary vs multiclass Sens/Spec calculation ---
+    if num_class == 2:
+        from sklearn.metrics import recall_score
+        # Class 1 is Malignant (Sensitivity), Class 0 is Benign (Specificity)
+        macro_sensitivity = recall_score(true_label_decode_array, prediction_decode_array, pos_label=1, zero_division=0)
+        macro_specificity = recall_score(true_label_decode_array, prediction_decode_array, pos_label=0, zero_division=0)
+    else:
+        confusion_matrices = multilabel_confusion_matrix(true_label_decode_array, prediction_decode_array)
+        sensitivity_list = []
+        specificity_list = []
 
-    for idx, cm in enumerate(confusion_matrices):
-        TN, FP, FN, TP = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
-        sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
-        sensitivity_list.append(sensitivity)
-        specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
-        specificity_list.append(specificity)
+        for idx, cm in enumerate(confusion_matrices):
+            TN, FP, FN, TP = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+            sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
+            sensitivity_list.append(sensitivity)
+            specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+            specificity_list.append(specificity)
 
-    sensitivity = np.array(sensitivity_list)
-    specificity = np.array(specificity_list)
-
-    macro_sensitivity = np.mean(sensitivity)
-    macro_specificity = np.mean(specificity)
+        macro_sensitivity = np.mean(sensitivity_list)
+        macro_specificity = np.mean(specificity_list)
 
     bacc = balanced_accuracy_score(true_label_decode_array, prediction_decode_array)
     acc = accuracy_score(true_label_decode_array, prediction_decode_array)
@@ -513,7 +515,6 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         print("!!! CAUGHT NAN ERROR DURING VALIDATION !!!")
         print("="*40)
                 
-        # 1. Check Predictions for NaNs
         if np.isnan(prediction_array).any():
             nan_count = np.sum(np.isnan(prediction_array))
             total_elements = prediction_array.size
@@ -522,27 +523,22 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
             print(f"ERROR: 'prediction_array' contains {nan_count} NaNs out of {total_elements} elements.")
             print(f"Indices of rows (images) containing NaNs: {nan_rows}")
             
-            # Print the data for the first bad row to see if it's ALL NaNs or just partial
             if len(nan_rows) > 0:
                 first_bad_idx = nan_rows[0]
                 print(f"\n--- Data Dump for Image Index {first_bad_idx} ---")
                 print(f"Prediction Vector: {prediction_array[first_bad_idx]}")
                 print(f"Ground Truth: {true_label_onehot_array[first_bad_idx]}")
 
-        # 2. Check for Infinity (just in case)
         if np.isinf(prediction_array).any():
             print(f"ERROR: 'prediction_array' contains Infinity values!")
             
-        # 3. Save the arrays to disk for offline analysis
         print("\n>>> Saving crashed arrays to .npy files for inspection...")
         np.save("debug_pred_array_crash.npy", prediction_array)
         np.save("debug_label_array_crash.npy", true_label_onehot_array)
         print(">>> Saved 'debug_pred_array_crash.npy' and 'debug_label_array_crash.npy'")
         print("="*40 + "\n")
         
-        # Re-raise the error so the job stops as expected
         raise e 
-    
 
     f1 = f1_score(true_label_decode_array, prediction_decode_array, average='weighted')
     recall = recall_score(true_label_decode_array, prediction_decode_array, average='macro')
@@ -556,16 +552,16 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
     
     # Record with dict for return value
     metrics = {
-    'balanced_accuracy': balanced_accuracy_score(true_label_decode_array, prediction_decode_array),
-    'accuracy': accuracy_score(true_label_decode_array, prediction_decode_array),
+    'balanced_accuracy': bacc,
+    'accuracy': acc,
     'top3 accuracy': top3_acc,
     'top5 accuracy': top5_acc,
     'sensitivity': macro_sensitivity,
     'specificity': macro_specificity,
-    'auc_roc': roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro'),
-    'weighted_f1': f1_score(true_label_decode_array, prediction_decode_array, average='weighted'),
-    'recall_macro': recall_score(true_label_decode_array, prediction_decode_array, average='macro'),
-    'recall_weighted': recall_score(true_label_decode_array, prediction_decode_array, average='weighted'),
+    'auc_roc': auc_roc,
+    'weighted_f1': f1,
+    'recall_macro': recall,
+    'recall_weighted': recall1,
     }
 
     if mode == 'test':
@@ -599,8 +595,8 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
             'Val Loss': 0.0,
             'Val BAcc': bacc,
             'Val Acc': acc,
-            'Val Sens': macro_sensitivity, # Added Sens
-            'Val Spec': macro_specificity, # Added Spec
+            'Val Sens': macro_sensitivity,
+            'Val Spec': macro_specificity,
             'Val ROC': auc_roc,
             f'{mode.capitalize()} W_F1': f1,
             f'{mode.capitalize()} Recall_macro': recall,
@@ -610,16 +606,14 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decisi
         wandb_res = {
             f'{mode.capitalize()} BAcc': bacc,
             f'{mode.capitalize()} Acc': acc,
-            f'{mode.capitalize()} Sens': macro_sensitivity, # Added Sens
-            f'{mode.capitalize()} Spec': macro_specificity, # Added Spec
+            f'{mode.capitalize()} Sens': macro_sensitivity,
+            f'{mode.capitalize()} Spec': macro_specificity,
             f'{mode.capitalize()} ROC': auc_roc,
             f'{mode.capitalize()} F1': f1,
             f'{mode.capitalize()} Recall_macro': recall,
             f'{mode.capitalize()} Recall_weighted': recall1
         }
 
-    # --- MODIFIED RETURN ---
-    # Return probabilities and labels for tuning
     return metrics, wandb_res, prediction_array, true_label_decode_array
 
 from torchvision.transforms.functional import to_pil_image, to_tensor
@@ -659,14 +653,12 @@ class TTAHandler:
         self.transforms = self.get_inference_transforms()
 
     def get_inference_transforms(self):
+        # --- FIX: Removed double resizing, aligned with training boundaries ---
         return transforms.Compose([
-            # NOTE - Commented out to prevent image distortion by applying resizing twice
-            # transforms.Resize(246),
-            # transforms.CenterCrop(224),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
-            transforms.RandomApply([transforms.RandomRotation(degrees=(0, 270))], p=0.3),
-            transforms.RandomApply([transforms.ColorJitter(hue=0.25, saturation=0.25)], p=0.3),
+            transforms.RandomApply([transforms.RandomRotation(30)], p=0.3),
+            transforms.RandomApply([transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)], p=0.3),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
@@ -683,13 +675,14 @@ class TTAHandler:
 @torch.no_grad()
 def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5, decision_threshold=None, is_skinehdlf=False):
     model.eval()
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss()  # Dummy criterion for compatibility
     metric_logger = MetricLogger(delimiter="  ")
     tta_handler = TTAHandler(num_augmentations=num_TTA)
     results = []
     all_preds = []
     all_targets = []
     logits = []
+    
     for batch in metric_logger.log_every(data_loader, 10, 'Test:'):
         images, targets = batch[0].to(device), batch[-1].to(device)
         batch_image_names = batch[1]
@@ -697,88 +690,89 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
         batch_image_list.extend(batch_image_names)
 
         tta_images = tta_handler.apply_transforms(images).to(device)  # TTA transform  [TTA_num, B, H, W]
-        _, B,_, _, _ = tta_images.shape
+        _, B, _, _, _ = tta_images.shape
         tta_inputs = tta_images.view(-1, *tta_images.shape[2:]) #  [TTA_num * B, H, W]
         outputs = model(tta_inputs)  # Reshape for model input
         reshaped_outputs = outputs.reshape(num_TTA, B, -1)
 
-        predictions = torch.mean(reshaped_outputs, dim=0) # <-- These are logits
-
-        # --- CONDITIONAL THRESHOLD LOGIC ---
-        logits.extend(predictions.cpu().numpy())
         all_targets.extend(targets.cpu().numpy())
 
-        if decision_threshold is None:
-            if is_skinehdlf and num_class == 2:
-                 # Default binary Sigmoid: > 0.5 (logit > 0)
-                 print("TTA: Using default Sigmoid > 0.5 threshold.")
-                 predicted = (predictions > 0).long().squeeze()
-            else:
-                 # Default multi-class: argmax
-                 print("TTA: Using default Argmax threshold.")
-                 _, predicted = torch.max(predictions, 1)
-            predicted_np = predicted.cpu().numpy()
-        else:
-            print(f"TTA: Using custom threshold {decision_threshold}.")
-            if is_skinehdlf and num_class == 2:
-                # Binary: Sigmoid -> Threshold
-                probs = torch.sigmoid(predictions).squeeze()
-                predicted = (probs >= decision_threshold)
-            else:
-                # Multi-class: Softmax -> Threshold on class 1
-                positive_probs = torch.softmax(predictions, dim=1)[:, 1]
-                predicted = (positive_probs >= decision_threshold)
-            predicted_np = predicted.cpu().numpy().astype(int)
-        
-        all_preds.extend(predicted_np)
-        # --- END NEW LOGIC ---
-
-        # Probs for CSV
+        # --- FIX: Average Probabilities, NOT Logits for Binary SkinEHDLF ---
         if is_skinehdlf and num_class == 2:
-            probs_pos = torch.sigmoid(predictions).squeeze()
-            probabilities = torch.stack((1-probs_pos, probs_pos), dim=1).cpu().numpy()
+            # 1. Apply Sigmoid to all views first
+            probs_all_views = torch.sigmoid(reshaped_outputs).squeeze(-1) 
+            # 2. Average the probabilities across the TTA dimension
+            mean_probs = torch.mean(probs_all_views, dim=0) 
+            
+            # Store mean logits for potential topk metrics later
+            mean_logits = torch.mean(reshaped_outputs, dim=0).squeeze(-1)
+            logits.extend(mean_logits.cpu().numpy())
+            
+            # 3. Apply threshold logic
+            if decision_threshold is None:
+                predicted = (mean_probs > 0.5)
+            else:
+                predicted = (mean_probs >= decision_threshold)
+                
+            predicted_np = predicted.cpu().numpy().astype(int)
+            all_preds.extend(predicted_np)
+            
+            # For CSV saving
+            probabilities = torch.stack((1-mean_probs, mean_probs), dim=1).cpu().numpy()
+            
         else:
+            # Fallback for standard multiclass
+            predictions = torch.mean(reshaped_outputs, dim=0) # Mean logits
+            logits.extend(predictions.cpu().numpy())
+            
+            if decision_threshold is None:
+                 _, predicted = torch.max(predictions, 1)
+            else:
+                 positive_probs = torch.softmax(predictions, dim=1)[:, 1]
+                 predicted = (positive_probs >= decision_threshold)
+                 
+            predicted_np = predicted.cpu().numpy().astype(int)
+            all_preds.extend(predicted_np)
+            
             probabilities = torch.softmax(predictions, dim=1).cpu().numpy()
-        
+
         for i, image_name in enumerate(batch_image_list):
             results.append({
                 'filename': image_name,
                 'true_label': targets[i].item(),
-                'predicted_label': predicted_np[i].item(), # <-- Use predicted_np
+                'predicted_label': predicted_np[i].item(),
                 'probabilities': probabilities[i]
             })
 
-    # CM
-    # cm = confusion_matrix(np.array(all_targets), np.array(all_preds))
     all_targets_np = np.array(all_targets)
     all_preds_np = np.array(all_preds)
     all_logits_np = np.array(logits)
 
-    confusion_matrices = multilabel_confusion_matrix(all_targets_np, all_preds_np)
-    sensitivity_list = []
-    specificity_list = []
-    
-    for idx, cm in enumerate(confusion_matrices):
-        TN = cm[0, 0]
-        FP = cm[0, 1]
-        FN = cm[1, 0]
-        TP = cm[1, 1]
-    
-        sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
-        sensitivity_list.append(sensitivity)
-    
-        specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
-        specificity_list.append(specificity)
+    # --- FIX: Separated binary vs multiclass Sens/Spec calculation ---
+    if num_class == 2:
+        from sklearn.metrics import recall_score
+        macro_sensitivity = recall_score(all_targets_np, all_preds_np, pos_label=1, zero_division=0)
+        macro_specificity = recall_score(all_targets_np, all_preds_np, pos_label=0, zero_division=0)
+    else:
+        confusion_matrices = multilabel_confusion_matrix(all_targets_np, all_preds_np)
+        sensitivity_list = []
+        specificity_list = []
+        
+        for idx, cm in enumerate(confusion_matrices):
+            TN = cm[0, 0]
+            FP = cm[0, 1]
+            FN = cm[1, 0]
+            TP = cm[1, 1]
+        
+            sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
+            sensitivity_list.append(sensitivity)
+        
+            specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+            specificity_list.append(specificity)
 
-    sensitivity = np.array(sensitivity_list)
-    specificity = np.array(specificity_list)
-
-    macro_sensitivity = np.mean(sensitivity)
-    macro_specificity = np.mean(specificity)
+        macro_sensitivity = np.mean(sensitivity_list)
+        macro_specificity = np.mean(specificity_list)
     
-    # print("Confusion Matrix:")
-    # print(confusion_matrices)
-    # probabilities = np.array(logits) # This is wrong, logits are not probabilities
 
     # Conditionally calculate top-k accuracy
     top3_acc = 0.0
@@ -792,7 +786,6 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     metrics = {
         'balanced_accuracy': balanced_accuracy_score(all_targets_np, all_preds_np),
         'accuracy': accuracy_score(all_targets_np, all_preds_np),
-        # 'auc_roc': roc_auc_score(F.one_hot(torch.tensor(all_targets), num_classes=num_class), np.array([r['probabilities'] for r in results]), multi_class='ovr'),
         'top3_acc' : top3_acc,
         'top5_acc' : top5_acc,
         'sensitivity': macro_sensitivity,
@@ -804,7 +797,6 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     print(metrics)
 
     # Save results to CSV
-    # os.mkdir(out_dir, exist_ok=True)
     output_csv_path = os.path.join(out_dir, f"{mode}.csv")
     with open(output_csv_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -824,5 +816,4 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
 
     print(f"Predictions for {mode} saved to {output_csv_path}")
     
-    # --- MODIFIED RETURN ---
     return metrics, None, all_logits_np, all_targets_np
