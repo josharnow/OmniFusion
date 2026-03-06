@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=8
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-1%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
+#SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
 
 
@@ -117,7 +117,7 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-best.pth" \
+    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-best-stage-1.pth" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -148,7 +148,7 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --no_auto_resume \
     --no_class_weights \
-    --resume "${FOLD_OUTPUT_DIR}/checkpoint-best.pth" \
+    --resume "${FOLD_OUTPUT_DIR}/checkpoint-best-stage-1.pth" \
     --TTA \
     --eval_threshold 0.5 \
     --eval # This flag forces evaluation ONLY

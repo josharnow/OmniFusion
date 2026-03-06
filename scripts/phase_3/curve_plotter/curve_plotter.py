@@ -176,32 +176,34 @@ def main():
     LOG_DIR = os.path.join(PROJECT_ROOT, LOG_DIR)
 
     if not os.path.isdir(LOG_DIR):
-      print(f"Error: A folder named '{LOG_DIR}' was not found.")
-      print("Please create it and place your log files inside.")
-      return
-
-    # --- 2. Prompt the user ---
-    log_filename = input(f"Please enter the name of the log file (must be in the '{LOG_DIR}' folder): ")
-
-    # Build the full file path
-    log_file_path = os.path.join(LOG_DIR, log_filename)
-
-    if not os.path.exists(log_file_path):
-        print(f"Error: File not found at {log_file_path}")
+        print(f"Error: A folder named '{LOG_DIR}' was not found.")
+        print("Please create it and place your log files inside.")
         return
 
-    # --- 3. Parse the file ---
-    df = parse_log_file(log_file_path)
+    # --- 2. Find all files in the logs directory ---
+    log_files = [f for f in os.listdir(LOG_DIR) if os.path.isfile(os.path.join(LOG_DIR, f))]
 
-    # --- 4. Plot if data was found ---
-    if df is not None and not df.empty:
-        # Create a base name for the output files (e.g., "run_3")
-        base_output_name = os.path.splitext(log_filename)[0]
-        # Save plots to the same directory as this script
-        output_dir = os.path.dirname(__file__)
-        plot_metrics(df, base_output_name, output_dir)
-    else:
-        print("No data was extracted. Exiting.")
+    if not log_files:
+        print(f"No files found in '{LOG_DIR}'. Exiting.")
+        return
+
+    print(f"Found {len(log_files)} file(s) in '{LOG_DIR}'. Processing each...\n")
+    output_dir = os.path.dirname(__file__)
+
+    # --- 3. Iteratively process each file ---
+    for log_filename in sorted(log_files):
+        log_file_path = os.path.join(LOG_DIR, log_filename)
+        print(f"\n{'='*60}")
+        print(f"Processing: {log_filename}")
+        print(f"{'='*60}")
+
+        df = parse_log_file(log_file_path)
+
+        if df is not None and not df.empty:
+            base_output_name = os.path.splitext(log_filename)[0]
+            plot_metrics(df, base_output_name, output_dir)
+        else:
+            print(f"No data extracted from '{log_filename}'. Skipping.")
 
 if __name__ == "__main__":
     main()

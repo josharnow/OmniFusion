@@ -52,20 +52,24 @@ def main(args):
     print(f"Aggregating results from: {args.output_dir}")
 
     for fold in range(1, args.n_splits + 1):
-        # Construct the expected filename for the results CSV of each fold
+        # Find the CSV file in the fold directory whose name contains the prefix
         fold_dir = os.path.join(args.output_dir, f"fold_{fold}")
-        # results_filename = f"fold_{fold}_{args.csv_filename}"
-        results_filename = args.csv_filename
-        results_path = os.path.join(fold_dir, results_filename)
+        results_path = None
+        if os.path.isdir(fold_dir):
+            matches = [f for f in os.listdir(fold_dir) if args.csv_prefix in f and f.endswith('.csv')]
+            if matches:
+                results_path = os.path.join(fold_dir, matches[0])
+                if len(matches) > 1:
+                    print(f"Warning: Multiple matches for prefix '{args.csv_prefix}' in fold {fold}: {matches}. Using '{matches[0]}'.")
 
-        if os.path.exists(results_path):
+        if results_path and os.path.exists(results_path):
             print(f"Reading results from: {results_path}")
             predictions_df = pd.read_csv(results_path)
             metrics = compute_metrics_from_predictions(predictions_df)
             metrics['fold'] = fold
             all_metrics.append(metrics)
         else:
-            print(f"Warning: Results file not found for fold {fold} at {results_path}")
+            print(f"Warning: No CSV file matching prefix '{args.csv_prefix}' found for fold {fold} in {fold_dir}")
 
     if not all_metrics:
         print("No metrics found to aggregate. Exiting.")
@@ -99,6 +103,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Aggregate results from k-fold CV')
     parser.add_argument('--output_dir', required=True, help='Path to the main output directory containing fold subdirectories')
     parser.add_argument('--n_splits', required=True, type=int, help='Number of folds that were run')
-    parser.add_argument('--csv_filename', required=True, type=str, help='The base name of the results CSV file')
+    parser.add_argument('--csv_prefix', required=True, type=str, help='Substring to match against CSV filenames in each fold directory')
     args = parser.parse_args()
     main(args)
