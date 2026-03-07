@@ -152,8 +152,9 @@ ${PYTHON} run_class_finetuning.py \
     --no_auto_resume \
     --weights \
     --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-lp.pth" \
-    --no_class_weights \
-    --is_stage_1_ft
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 1.75 \
+    --is_stage_1_ft 
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
 
     # --sq_root_loss \
