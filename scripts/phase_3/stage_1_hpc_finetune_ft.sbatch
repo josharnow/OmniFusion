@@ -45,6 +45,7 @@ UPDATE_FREQ=1
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=5           #
 EPOCHS=40                 # Start with 10 epochs and increase if needed (README uses 50)
@@ -153,7 +154,7 @@ ${PYTHON} run_class_finetuning.py \
     --weights \
     --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-lp.pth" \
     --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 1.75 \
+    --custom_minority_alpha 2.0 \
     --is_stage_1_ft 
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
 
