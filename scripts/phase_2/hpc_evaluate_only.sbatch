@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=panderm_%a
-#SBATCH --output=../../logs/phase_1/finetune_job_%A_%a.out
-#SBATCH --error=../../logs/phase_1/finetune_job_%A_%a.err
+#SBATCH --output=../../logs/phase_2/evaluate_job_%A_%a.out
+#SBATCH --error=../../logs/phase_2/evaluate_job_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
+#SBATCH --array=1-1%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
 
 
@@ -15,10 +15,10 @@
 PYTHON="python3"
 MODEL="PanDerm_Large_FT" # Base model to start fine-tuning from
 NB_CLASSES=2
-OUTPUT_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_1"
+OUTPUT_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_2"
 # CSV_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/ISIC 2024 (SLICE-3D)/ISIC_2024_Training_GroundTruth.csv"
-CSV_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_1" # IMPORTANT: Directory containing your fold_data.csv files
-ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/ISIC 2024 (SLICE-3D)/ISIC_2024_Training_Input/"
+CSV_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_2" # IMPORTANT: Directory containing your fold_data.csv files
+ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/images/"
 # Below is the pretrained checkpoint for the ENTIRE PanDerm dataset (DO NOT USE FOR THESIS)
 # PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
 # Below is the pretrained checkpoint for Imagenet, which the authors used for their pretraining prior to training on the entire dataset from their paper (USE FOR THESIS)
@@ -31,18 +31,19 @@ NUM_WORKERS=0
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}"
 FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data.csv"
 
+CHECKPOINT_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best.pth" # For evaluation, this is also the "resume" arguments which is necessary to specify the storage location of finetuned model weights
+
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
-BATCH_SIZE=80             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-# BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+BATCH_SIZE=384             # This can be substantially higher than training since no backpropagation is needed
 LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=0.75          #
-DROP_PATH=0.3             #
-WEIGHT_DECAY=0.1         #
+DROP_PATH=0.2             #
+WEIGHT_DECAY=0.05         #
 # NOTE - Disabling mixup and cutmix for now
 MIXUP=0.0                 #
 CUTMIX=0.0                #
@@ -50,9 +51,7 @@ CUTMIX=0.0                #
 # CUTMIX=1.0                #
 SMOOTHING=0.0
 REPROB=0.25               #
-MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
-
-DROPOUT_RATE=0.5          # Adding dropout for fine-tuning to reduce overfitting
+MONITOR="recall"     # Metric to monitor for saving best model
 
 # --- Change to the project root directory ---
 cd ../..
@@ -96,7 +95,8 @@ if [ ! -d venv ]; then
 fi
 source venv/bin/activate
 
-
+# --- HANDLES WANDB ERROR ---
+export WANDB_MODE=offline
 
 
 
@@ -109,48 +109,13 @@ cd classification
 export MASTER_ADDR=localhost
 export MASTER_PORT=12355 # A random, unused port
 
-# --- Linear probing warmup ---
-${PYTHON} run_class_finetuning.py \
-    --model ${MODEL} \
-    --csv_path "${FOLD_CSV_PATH}" \
-    --data_path "${FOLD_CSV_PATH}" \
-    --batch_size 1024 \
-    --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
-    --output_dir "${FOLD_OUTPUT_DIR}" \
-    --log_dir "${FOLD_OUTPUT_DIR}" \
-    --nb_classes ${NB_CLASSES} \
-    --num_workers ${NUM_WORKERS} \
-    --layer_decay ${LAYER_DECAY} \
-    --drop_path ${DROP_PATH} \
-    --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
-    --smoothing ${SMOOTHING} \
-    --reprob ${REPROB} \
-    --monitor ${MONITOR} \
-    --TTA \
-    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase1_LP" \
-    --weights \
-    --drop ${DROPOUT_RATE} \
-    --clip_grad 1.0 \
-    --lr 1e-2 \
-    --warmup_epochs 2 \
-    --epochs 20 \
-    --enable_linear_eval \
-    --freeze_backbone \
-    --focal_loss \
-    --no_class_weights
-
-
-# --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
 ${PYTHON} run_class_finetuning.py \
     --model ${MODEL} \
     --csv_path "${FOLD_CSV_PATH}" \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
-    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-last.pth" \
+    --pretrained_checkpoint "${CHECKPOINT_PATH}" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -168,15 +133,13 @@ ${PYTHON} run_class_finetuning.py \
     --monitor ${MONITOR} \
     --TTA \
     --weights \
-    --drop ${DROPOUT_RATE} \
-    --clip_grad 1.0 \
-    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
-    --aa 'rand-m9-mstd0.5-inc1' \
-    --focal_loss \
-    --focal_loss_gamma 4.0 \
+    --disable_amp \
+    --resume "${CHECKPOINT_PATH}" \
     --enable_linear_eval \
-    --no_class_weights
+    --eval_threshold 0.4 \
+    --eval # This flag forces evaluation ONLY
 
+    # --pretrained_checkpoint "${PRETRAINED_CHECKPOINT}" \
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
 echo "Finished fine-tuning job for Fold ${SLURM_ARRAY_TASK_ID}"

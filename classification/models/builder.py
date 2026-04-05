@@ -20,6 +20,8 @@ from models.modeling_finetune import VisionTransformer
 from utils.utils import cae_kwargs
 from functools import partial
 
+from .skin_ehdlf import skin_ehdlf_hybrid
+
 def get_norm_constants(which_img_norm: str = 'imagenet'):
     """Return mean/std tuples used for normalization in eval transforms.
 
@@ -92,6 +94,27 @@ def get_encoder(args, model_name,which_img_norm='imagenet'):
 
         model.load_state_dict(torch.load(args.pretrained_checkpoint, map_location='cpu'), strict=False) 
         model.head = torch.nn.Identity()
+    elif model_name == 'SkinEHDLF_Hybrid':
+        # The hybrid model includes its own classifier, so we might need to handle args.num_classes if your pipeline expects the encoder to exclude the head.
+        # However, since this is a custom hybrid, it's often easier to return the full model.
+        # If your pipeline strictly separates encoder/head, you might need to adjust logic in run_class_finetuning.py
+        
+        print(f"Initializing SkinEHDLF Hybrid Model with {args.nb_classes} classes...")
+        
+        # Load the model directly. 
+        # Note: We pass num_classes here because SkinEHDLF includes its own classifier head.
+        model = skin_ehdlf_hybrid(num_classes=args.nb_classes)
+
+        # SkinEHDLF is a hybrid, not a pure ViT, so it has no single 'patch_size'.
+        # We set these to None or defaults to avoid crashes later if args are accessed.
+        args.patch_size = None
+        args.window_size = None
+        
+        # Note: SkinEHDLF is composed of pretrained parts, so we typically don't load a single "SkinEHDLF" checkpoint unless you have saved one from Phase 3 training.
+        if hasattr(args, 'pretrained_checkpoint') and args.pretrained_checkpoint:
+             print(f"Loading custom hybrid checkpoint from {args.pretrained_checkpoint}")
+             checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu')
+             model.load_state_dict(checkpoint, strict=False)
     else:
         raise NotImplementedError('model {} not implemented'.format(model_name))
     

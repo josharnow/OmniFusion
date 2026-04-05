@@ -74,14 +74,10 @@ def misc_measures(confusion_matrix):
     mcc_ = np.array(mcc_).mean()
 
     return bacc, sensitivity, specificity, precision, G, F1_score_2, mcc_
+
 def train_class_batch(model, samples, target, criterion):
     outputs = model(samples)
-    # --- ADD THIS CHECK ---
-    # print_tensor_stats(outputs, name="Model Output (logits)")
-    # --- END CHECK ---
     loss = criterion(outputs, target)
-    # print_tensor_stats(loss, name="Calculated Loss")
-    print(flush=True)
     return loss, outputs
 
 
@@ -100,10 +96,6 @@ def train_full_precision(
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None
 ):
-    print("Training in Full Precision (FP32) mode.")
-    # *** --- START: Full Precision (FP32) Training Logic --- ***
-    # The autocast and loss_scaler logic has been removed.
-    
     # Forward pass
     loss, output = train_class_batch(model, samples, targets, criterion)
     loss_value = loss.item()
@@ -129,7 +121,6 @@ def train_full_precision(
             model_ema.update(model)
     
     loss_scale_value = 1.0 # Not using loss scaler in FP32
-    # *** --- END: Full Precision (FP32) Training Logic *** ---
     return loss_value, output, loss_scale_value, grad_norm
 
 def train_amp(
@@ -144,7 +135,6 @@ def train_amp(
     max_norm: float = 0,
     model_ema: Optional[ModelEma] = None
 ):
-    print("Training with Automatic Mixed Precision (AMP).")
     if loss_scaler is None:
         samples = samples.half()
         loss, output = train_class_batch(
@@ -166,14 +156,11 @@ def train_amp(
         model.step()
 
         if (data_iter_step + 1) % update_freq == 0:
-            # model.zero_grad()
-            # Deepspeed will call step() & model.zero_grad() automatic
             if model_ema is not None:
                 model_ema.update(model)
         grad_norm = None
         loss_scale_value = get_loss_scale_for_deepspeed(model)
     else:
-        # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         loss /= update_freq
         grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
@@ -202,6 +189,17 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     optimizer.zero_grad()
 
+    if args and args.disable_amp:
+        print("Training in Full Precision (FP32) mode.")
+    else:
+        print("Training with Automatic Mixed Precision (AMP).")
+
+    # --- CHECK: SkinEHDLF + Binary Mode ---
+    is_skinehdlf_binary = False
+    if args is not None:
+        if hasattr(args, 'is_skinehdlf') and hasattr(args, 'nb_classes'):
+            is_skinehdlf_binary = args.is_skinehdlf and (args.nb_classes == 2)
+
     for data_iter_step, (samples, _, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         step = data_iter_step // update_freq
         if step >= num_training_steps_per_epoch:
@@ -224,8 +222,21 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        # TODO - Change conditional to look for --disable-amp flag
-        # if loss_scaler is None:
+        # --- FIX: Match Targets to Sigmoid Output (BCE) ---
+        if is_skinehdlf_binary:
+            # Case 1: Mixup/CutMix Active -> Targets are [B, 2] (Softmax format)
+            # We must convert to [B, 1] by taking the Probability of Class 1 (Malignant)
+            if targets.dim() == 2 and targets.shape[1] == 2:
+                targets = targets[:, 1].view(-1, 1)
+            
+            # Case 2: No Mixup -> Targets are [B] (Indices)
+            elif targets.dim() == 1:
+                targets = targets.view(-1, 1)
+            
+            # Ensure float type for BCEWithLogitsLoss
+            if targets.dtype != torch.float32 and targets.dtype != torch.float16:
+                targets = targets.float()
+
         if args and args.disable_amp:
             loss_value, output, loss_scale_value, grad_norm = train_full_precision(
                 model, samples, targets, criterion, optimizer,
@@ -235,17 +246,53 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             loss_value, output, loss_scale_value, grad_norm = train_amp(
                 model, samples, targets, criterion, optimizer,
                 data_iter_step, update_freq, loss_scaler, max_norm, model_ema)
-            
-            # raise NotImplementedError("Only Full Precision (FP32) training is implemented in this version.")
 
         torch.cuda.synchronize()
 
         if mixup_fn is None:
-            class_acc = (output.max(-1)[-1] == targets).float().mean()
+            # --- START: METRIC LOGIC ---
+            if is_skinehdlf_binary:
+                # Sigmoid Logic
+                probs = torch.sigmoid(output).squeeze()
+                preds = (probs > 0.5).float()
+                
+                # Targets are float [B, 1], flatten for comparison
+                targets_flat = targets.squeeze()
+                
+                class_acc = (preds == targets_flat).float().mean()
+                
+                tp = ((preds == 1) & (targets_flat == 1)).sum().float()
+                fn = ((preds == 0) & (targets_flat == 1)).sum().float()
+                tn = ((preds == 0) & (targets_flat == 0)).sum().float()
+                fp = ((preds == 1) & (targets_flat == 0)).sum().float()
+            else:
+                # Softmax/Argmax Logic (Standard)
+                preds = output.max(-1)[-1]
+                class_acc = (preds == targets).float().mean()
+                
+                # Assuming class 1 is positive, 0 is negative
+                tp = ((preds == 1) & (targets == 1)).sum().float()
+                fn = ((preds == 0) & (targets == 1)).sum().float()
+                tn = ((preds == 0) & (targets == 0)).sum().float()
+                fp = ((preds == 1) & (targets == 0)).sum().float()
+
+            sens = tp / (tp + fn + 1e-8)
+            spec = tn / (tn + fp + 1e-8)
+            # --- END: METRIC LOGIC ---
         else:
             class_acc = None
+            sens = None
+            spec = None
+
         metric_logger.update(loss=loss_value)
         metric_logger.update(class_acc=class_acc)
+        
+        # Add new metrics to logger
+        if sens is not None:
+            metric_logger.update(sens=sens)
+        if spec is not None:
+            metric_logger.update(spec=spec)
+            
         metric_logger.update(loss_scale=loss_scale_value)
         min_lr = 10.
         max_lr = 0.
@@ -265,6 +312,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
             log_writer.update(class_acc=class_acc, head="loss")
+            
+            # Log new metrics to tensorboard/wandb
+            if sens is not None:
+                log_writer.update(class_sens=sens, head="loss")
+            if spec is not None:
+                log_writer.update(class_spec=spec, head="loss")
+                
             log_writer.update(loss_scale=loss_scale_value, head="opt")
             log_writer.update(lr=max_lr, head="opt")
             log_writer.update(min_lr=min_lr, head="opt")
@@ -280,7 +334,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def save_predictions_csv(model, data_loader, device, original_csv_path, output_dir, dataset_name):
+def save_predictions_csv(model, data_loader, device, original_csv_path, output_dir, dataset_name, is_skinehdlf=False):
     # Read the original CSV file
     original_df = pd.read_csv(original_csv_path)
 
@@ -301,9 +355,16 @@ def save_predictions_csv(model, data_loader, device, original_csv_path, output_d
             # Compute output
             output = model(images)
 
-            # Get predicted class and probabilities
-            probs = torch.nn.functional.softmax(output, dim=1)
-            _, preds = torch.max(probs, 1)
+            # --- MODIFIED: Basic shape check + Explicit Flag for SkinEHDLF ---
+            if is_skinehdlf and output.shape[1] == 1:
+                 # Likely SkinEHDLF Binary -> Sigmoid
+                 probs_pos = torch.sigmoid(output).squeeze()
+                 preds = (probs_pos > 0.5).long()
+                 probs = torch.stack((1 - probs_pos, probs_pos), dim=1)
+            else:
+                 # Standard -> Softmax
+                 probs = torch.nn.functional.softmax(output, dim=1)
+                 _, preds = torch.max(probs, 1)
 
             # Store results
             for filename, true_label, pred, prob in zip(filenames, targets, preds, probs):
@@ -340,7 +401,8 @@ def save_predictions_csv(model, data_loader, device, original_csv_path, output_d
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
+def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class, decision_threshold=None, is_skinehdlf=False):
+    # Dummy criterion, not critical here
     criterion = torch.nn.CrossEntropyLoss()
     metric_logger = MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -365,62 +427,78 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
         true_label = F.one_hot(target.to(torch.int64), num_classes=num_class)
 
         # compute output
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'):
             output = model(images)
-            loss = criterion(output, target)
 
-        prediction_softmax = nn.Softmax(dim=1)(output)
-        _, prediction_decode = torch.max(prediction_softmax, 1)
-        _, true_label_decode = torch.max(true_label, 1)
-
-        prediction_decode_list.extend(prediction_decode.cpu().detach().numpy())
+        # --- CONDITIONAL OUTPUT LOGIC ---
+        if is_skinehdlf and num_class == 2:
+            # Binary SkinEHDLF (Sigmoid)
+            probs = torch.sigmoid(output).squeeze()
+            # Convert to [B, 2] probability format: [Prob(0), Prob(1)]
+            # 1-p is Benign, p is Malignant
+            prediction_softmax = torch.stack((1 - probs, probs), dim=1)
+        else:
+            # Standard (Softmax)
+            prediction_softmax = nn.Softmax(dim=1)(output)
+        
+        # Decode targets
+        if true_label.shape[1] == num_class:
+             _, true_label_decode = torch.max(true_label, 1)
+        else:
+             true_label_decode = target
+        
         true_label_decode_list.extend(true_label_decode.cpu().detach().numpy())
         true_label_onehot_list.extend(true_label.cpu().detach().numpy())
         prediction_list.extend(prediction_softmax.cpu().detach().numpy())
 
-        # Store results for CSV
-        for filename, true_label, pred, prob in zip(batch[1], true_label_decode, prediction_decode, prediction_softmax):
-            # print('fffffffffffff',filename)
-            results.append({
-                'filename': filename,
-                'true_label': true_label.item(),
-                'predicted_label': pred.item(),
-                'probabilities': prob.cpu().numpy()
-            })
-
     # Convert lists to numpy arrays
-    true_label_decode_array = np.array(true_label_decode_list)
-    prediction_decode_array = np.array(prediction_decode_list)
+    true_label_decode_array = np.array(true_label_decode_list) # This is y_true
     true_label_onehot_array = np.array(true_label_onehot_list)
-    prediction_array = np.array(prediction_list)
+    prediction_array = np.array(prediction_list) # This is y_prob
 
-    confusion_matrices = multilabel_confusion_matrix(true_label_decode_array, prediction_decode_array)
-    
-    sensitivity_list = []
-    specificity_list = []
+    # --- NEW THRESHOLD LOGIC ---
+    if decision_threshold is None:
+        # Default behavior
+        prediction_decode_array = np.argmax(prediction_array, axis=1)
+    else:
+        # Custom threshold
+        positive_probs = prediction_array[:, 1] # Get probs for class 1
+        prediction_decode_array = (positive_probs >= decision_threshold).astype(int)
+    # --- END NEW LOGIC ---
 
-    for idx, cm in enumerate(confusion_matrices):
-        TN = cm[0, 0]
-        FP = cm[0, 1]
-        FN = cm[1, 0]
-        TP = cm[1, 1]
-    
-        sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
-        sensitivity_list.append(sensitivity)
-    
-        specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
-        specificity_list.append(specificity)
+    # Store results for CSV (now using the thresholded predictions)
+    for i in range(len(image_names)):
+        results.append({
+            'filename': image_names[i],
+            'true_label': true_label_decode_array[i].item(),
+            'predicted_label': prediction_decode_array[i].item(),
+            'probabilities': prediction_array[i]
+        })
 
-    sensitivity = np.array(sensitivity_list)
-    specificity = np.array(specificity_list)
+    # --- FIX: Separated binary vs multiclass Sens/Spec calculation ---
+    if num_class == 2:
+        from sklearn.metrics import recall_score
+        # Class 1 is Malignant (Sensitivity), Class 0 is Benign (Specificity)
+        macro_sensitivity = recall_score(true_label_decode_array, prediction_decode_array, pos_label=1, zero_division=0)
+        macro_specificity = recall_score(true_label_decode_array, prediction_decode_array, pos_label=0, zero_division=0)
+    else:
+        confusion_matrices = multilabel_confusion_matrix(true_label_decode_array, prediction_decode_array)
+        sensitivity_list = []
+        specificity_list = []
 
-    macro_sensitivity = np.mean(sensitivity)
-    macro_specificity = np.mean(specificity)
+        for idx, cm in enumerate(confusion_matrices):
+            TN, FP, FN, TP = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+            sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
+            sensitivity_list.append(sensitivity)
+            specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+            specificity_list.append(specificity)
+
+        macro_sensitivity = np.mean(sensitivity_list)
+        macro_specificity = np.mean(specificity_list)
 
     bacc = balanced_accuracy_score(true_label_decode_array, prediction_decode_array)
     acc = accuracy_score(true_label_decode_array, prediction_decode_array)
 
-    # --- START OF FIX ---
     # Only calculate top-k accuracy if k is less than the number of classes
     top3_acc = 0.0
     if num_class >= 3:
@@ -429,32 +507,61 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
     top5_acc = 0.0
     if num_class >= 5:
         top5_acc = top_k_accuracy_score(true_label_decode_array, prediction_array, k=5, labels=np.arange(num_class))
-    # --- END OF FIX ---
 
-    auc_roc = roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro')
+    try:
+        auc_roc = roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro')
+    except ValueError as e:
+        print("\n" + "="*40)
+        print("!!! CAUGHT NAN ERROR DURING VALIDATION !!!")
+        print("="*40)
+                
+        if np.isnan(prediction_array).any():
+            nan_count = np.sum(np.isnan(prediction_array))
+            total_elements = prediction_array.size
+            nan_rows = np.unique(np.where(np.isnan(prediction_array))[0])
+            
+            print(f"ERROR: 'prediction_array' contains {nan_count} NaNs out of {total_elements} elements.")
+            print(f"Indices of rows (images) containing NaNs: {nan_rows}")
+            
+            if len(nan_rows) > 0:
+                first_bad_idx = nan_rows[0]
+                print(f"\n--- Data Dump for Image Index {first_bad_idx} ---")
+                print(f"Prediction Vector: {prediction_array[first_bad_idx]}")
+                print(f"Ground Truth: {true_label_onehot_array[first_bad_idx]}")
 
+        if np.isinf(prediction_array).any():
+            print(f"ERROR: 'prediction_array' contains Infinity values!")
+            
+        print("\n>>> Saving crashed arrays to .npy files for inspection...")
+        np.save("debug_pred_array_crash.npy", prediction_array)
+        np.save("debug_label_array_crash.npy", true_label_onehot_array)
+        print(">>> Saved 'debug_pred_array_crash.npy' and 'debug_label_array_crash.npy'")
+        print("="*40 + "\n")
+        
+        raise e 
 
     f1 = f1_score(true_label_decode_array, prediction_decode_array, average='weighted')
     recall = recall_score(true_label_decode_array, prediction_decode_array, average='macro')
     recall1 = recall_score(true_label_decode_array, prediction_decode_array, average='weighted')
 
     print('-------------', mode, '-------------')
+    # --- MODIFIED LOGGING: Output Sensitivity and Specificity ---
     print(
-        'Sklearn Metrics - BAcc: {:.4f} Acc: {:.4f} Recall_macro: {:.4f} Recall_weighted: {:.4f} AUC-ROC: {:.4f} Weighted F1-score: {:.4f}'.format(
-            bacc, acc, recall, recall1, auc_roc, f1))
+        'Sklearn Metrics - BAcc: {:.4f} Acc: {:.4f} Sens: {:.4f} Spec: {:.4f} Recall_macro: {:.4f} Recall_weighted: {:.4f} AUC-ROC: {:.4f} Weighted F1-score: {:.4f}'.format(
+            bacc, acc, macro_sensitivity, macro_specificity, recall, recall1, auc_roc, f1))
     
     # Record with dict for return value
     metrics = {
-    'balanced_accuracy': balanced_accuracy_score(true_label_decode_array, prediction_decode_array),
-    'accuracy': accuracy_score(true_label_decode_array, prediction_decode_array),
+    'balanced_accuracy': bacc,
+    'accuracy': acc,
     'top3 accuracy': top3_acc,
     'top5 accuracy': top5_acc,
     'sensitivity': macro_sensitivity,
     'specificity': macro_specificity,
-    'auc_roc': roc_auc_score(true_label_onehot_array, prediction_array, multi_class='ovr', average='macro'),
-    'weighted_f1': f1_score(true_label_decode_array, prediction_decode_array, average='weighted'),
-    'recall_macro': recall_score(true_label_decode_array, prediction_decode_array, average='macro'),
-    'recall_weighted': recall_score(true_label_decode_array, prediction_decode_array, average='weighted'),
+    'auc_roc': auc_roc,
+    'weighted_f1': f1,
+    'recall_macro': recall,
+    'recall_weighted': recall1,
     }
 
     if mode == 'test':
@@ -485,9 +592,11 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
     if mode == 'val':
         wandb_res = {
             'Epoch': epoch,
-            'Val Loss': loss.item(),
+            'Val Loss': 0.0,
             'Val BAcc': bacc,
             'Val Acc': acc,
+            'Val Sens': macro_sensitivity,
+            'Val Spec': macro_specificity,
             'Val ROC': auc_roc,
             f'{mode.capitalize()} W_F1': f1,
             f'{mode.capitalize()} Recall_macro': recall,
@@ -497,13 +606,15 @@ def evaluate(data_loader, model, device, out_dir, epoch, mode, num_class):
         wandb_res = {
             f'{mode.capitalize()} BAcc': bacc,
             f'{mode.capitalize()} Acc': acc,
+            f'{mode.capitalize()} Sens': macro_sensitivity,
+            f'{mode.capitalize()} Spec': macro_specificity,
             f'{mode.capitalize()} ROC': auc_roc,
             f'{mode.capitalize()} F1': f1,
             f'{mode.capitalize()} Recall_macro': recall,
             f'{mode.capitalize()} Recall_weighted': recall1
         }
 
-    return metrics, wandb_res
+    return metrics, wandb_res, prediction_array, true_label_decode_array
 
 from torchvision.transforms.functional import to_pil_image, to_tensor
 
@@ -542,13 +653,12 @@ class TTAHandler:
         self.transforms = self.get_inference_transforms()
 
     def get_inference_transforms(self):
+        # --- FIX: Removed double resizing, aligned with training boundaries ---
         return transforms.Compose([
-            transforms.Resize(246),
-            transforms.CenterCrop(224),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
-            transforms.RandomApply([transforms.RandomRotation(degrees=(0, 270))], p=0.3),
-            transforms.RandomApply([transforms.ColorJitter(hue=0.25, saturation=0.25)], p=0.3),
+            transforms.RandomApply([transforms.RandomRotation(30)], p=0.3),
+            transforms.RandomApply([transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)], p=0.3),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
@@ -563,15 +673,16 @@ class TTAHandler:
         return torch.stack(augmented_batches, dim=0)
 
 @torch.no_grad()
-def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5):
+def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, num_TTA=5, decision_threshold=None, is_skinehdlf=False):
     model.eval()
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss()  # Dummy criterion for compatibility
     metric_logger = MetricLogger(delimiter="  ")
     tta_handler = TTAHandler(num_augmentations=num_TTA)
     results = []
     all_preds = []
     all_targets = []
     logits = []
+    
     for batch in metric_logger.log_every(data_loader, 10, 'Test:'):
         images, targets = batch[0].to(device), batch[-1].to(device)
         batch_image_names = batch[1]
@@ -579,72 +690,113 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
         batch_image_list.extend(batch_image_names)
 
         tta_images = tta_handler.apply_transforms(images).to(device)  # TTA transform  [TTA_num, B, H, W]
-        _, B,_, _, _ = tta_images.shape
+        _, B, _, _, _ = tta_images.shape
         tta_inputs = tta_images.view(-1, *tta_images.shape[2:]) #  [TTA_num * B, H, W]
         outputs = model(tta_inputs)  # Reshape for model input
         reshaped_outputs = outputs.reshape(num_TTA, B, -1)
 
-        predictions = torch.mean(reshaped_outputs, dim=0)
-
-        _, predicted = torch.max(predictions, 1)
-        logits.extend(predictions.cpu().numpy())
-        all_preds.extend(predicted.cpu().numpy())
         all_targets.extend(targets.cpu().numpy())
 
-        probabilities = torch.softmax(predictions, dim=1).cpu().numpy()
-        
+        # --- FIX: Average Probabilities, NOT Logits for Binary SkinEHDLF ---
+        if is_skinehdlf and num_class == 2:
+            # 1. Apply Sigmoid to all views first
+            probs_all_views = torch.sigmoid(reshaped_outputs).squeeze(-1) 
+            # 2. Average the probabilities across the TTA dimension
+            mean_probs = torch.mean(probs_all_views, dim=0) 
+            
+            # Store mean logits for potential topk metrics later
+            mean_logits = torch.mean(reshaped_outputs, dim=0).squeeze(-1)
+            logits.extend(mean_logits.cpu().numpy())
+            
+            # 3. Apply threshold logic
+            if decision_threshold is None:
+                predicted = (mean_probs > 0.5)
+            else:
+                predicted = (mean_probs >= decision_threshold)
+                
+            predicted_np = predicted.cpu().numpy().astype(int)
+            all_preds.extend(predicted_np)
+            
+            # For CSV saving
+            probabilities = torch.stack((1-mean_probs, mean_probs), dim=1).cpu().numpy()
+            
+        else:
+            # Fallback for standard multiclass
+            predictions = torch.mean(reshaped_outputs, dim=0) # Mean logits
+            logits.extend(predictions.cpu().numpy())
+            
+            if decision_threshold is None:
+                 _, predicted = torch.max(predictions, 1)
+            else:
+                 positive_probs = torch.softmax(predictions, dim=1)[:, 1]
+                 predicted = (positive_probs >= decision_threshold)
+                 
+            predicted_np = predicted.cpu().numpy().astype(int)
+            all_preds.extend(predicted_np)
+            
+            probabilities = torch.softmax(predictions, dim=1).cpu().numpy()
+
         for i, image_name in enumerate(batch_image_list):
             results.append({
                 'filename': image_name,
                 'true_label': targets[i].item(),
-                'predicted_label': predicted[i].item(),
+                'predicted_label': predicted_np[i].item(),
                 'probabilities': probabilities[i]
             })
 
-    # CM
-    # cm = confusion_matrix(np.array(all_targets), np.array(all_preds))
-    confusion_matrices = multilabel_confusion_matrix(np.array(all_targets), np.array(all_preds))
-    sensitivity_list = []
-    specificity_list = []
-    
-    for idx, cm in enumerate(confusion_matrices):
-        TN = cm[0, 0]
-        FP = cm[0, 1]
-        FN = cm[1, 0]
-        TP = cm[1, 1]
-    
-        sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
-        sensitivity_list.append(sensitivity)
-    
-        specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
-        specificity_list.append(specificity)
+    all_targets_np = np.array(all_targets)
+    all_preds_np = np.array(all_preds)
+    all_logits_np = np.array(logits)
 
-    sensitivity = np.array(sensitivity_list)
-    specificity = np.array(specificity_list)
+    # --- FIX: Separated binary vs multiclass Sens/Spec calculation ---
+    if num_class == 2:
+        from sklearn.metrics import recall_score
+        macro_sensitivity = recall_score(all_targets_np, all_preds_np, pos_label=1, zero_division=0)
+        macro_specificity = recall_score(all_targets_np, all_preds_np, pos_label=0, zero_division=0)
+    else:
+        confusion_matrices = multilabel_confusion_matrix(all_targets_np, all_preds_np)
+        sensitivity_list = []
+        specificity_list = []
+        
+        for idx, cm in enumerate(confusion_matrices):
+            TN = cm[0, 0]
+            FP = cm[0, 1]
+            FN = cm[1, 0]
+            TP = cm[1, 1]
+        
+            sensitivity = TP / (TP + FN) if (TP + FN) > 0 else 0
+            sensitivity_list.append(sensitivity)
+        
+            specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+            specificity_list.append(specificity)
 
-    macro_sensitivity = np.mean(sensitivity)
-    macro_specificity = np.mean(specificity)
+        macro_sensitivity = np.mean(sensitivity_list)
+        macro_specificity = np.mean(specificity_list)
     
-    # print("Confusion Matrix:")
-    # print(confusion_matrices)
-    probabilities = np.array(logits)
+
+    # Conditionally calculate top-k accuracy
+    top3_acc = 0.0
+    if num_class >= 3:
+        top3_acc = top_k_accuracy_score(all_targets_np, all_logits_np, k=3, labels=np.arange(num_class))
+
+    top5_acc = 0.0
+    if num_class >= 5:
+        top5_acc = top_k_accuracy_score(all_targets_np, all_logits_np, k=5, labels=np.arange(num_class))
 
     metrics = {
-        'balanced_accuracy': balanced_accuracy_score(all_targets, all_preds),
-        'accuracy': accuracy_score(all_targets, all_preds),
-        # 'auc_roc': roc_auc_score(F.one_hot(torch.tensor(all_targets), num_classes=num_class), np.array([r['probabilities'] for r in results]), multi_class='ovr'),
-        'top3_acc' : top_k_accuracy_score(all_targets, probabilities, k=3, labels=np.arange(num_class)),
-        'top5_acc' : top_k_accuracy_score(all_targets, probabilities, k=5, labels=np.arange(num_class)),
+        'balanced_accuracy': balanced_accuracy_score(all_targets_np, all_preds_np),
+        'accuracy': accuracy_score(all_targets_np, all_preds_np),
+        'top3_acc' : top3_acc,
+        'top5_acc' : top5_acc,
         'sensitivity': macro_sensitivity,
         'specificity': macro_specificity,
-        'weighted_f1': f1_score(all_targets, all_preds, average='weighted'),
-        'recall_macro': recall_score(all_targets, all_preds, average='macro'),
-        'recall_weighted': recall_score(all_targets, all_preds, average='weighted'),
+        'weighted_f1': f1_score(all_targets_np, all_preds_np, average='weighted'),
+        'recall_macro': recall_score(all_targets_np, all_preds_np, average='macro'),
+        'recall_weighted': recall_score(all_targets_np, all_preds_np, average='weighted'),
     }
     print(metrics)
 
     # Save results to CSV
-    # os.mkdir(out_dir, exist_ok=True)
     output_csv_path = os.path.join(out_dir, f"{mode}.csv")
     with open(output_csv_path, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -663,4 +815,5 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
             writer.writerow(row)
 
     print(f"Predictions for {mode} saved to {output_csv_path}")
-    return metrics, None
+    
+    return metrics, None, all_logits_np, all_targets_np

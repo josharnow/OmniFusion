@@ -1,6 +1,15 @@
 # Add these imports at the top of the file
 import os
+# This respects SLURM/Docker resource limits (best for HPC)
+try:
+    print(f"Available CPU cores: {len(os.sched_getaffinity(0))}")
+except AttributeError:
+    # Fallback for systems that don't support sched_getaffinity
+    print(f"Total Physical CPU cores: {os.cpu_count()}")
+
 from dotenv import load_dotenv
+
+from preprocessing_online import AdvancedSkinProcessing
 
 # --- ADD THIS DEBUGGING BLOCK AT THE VERY TOP ---
 import torch
@@ -47,6 +56,25 @@ import torch.nn.functional as F
 from torch import nn
 import furnace.utils as utils
 from scipy import interpolate
+from sklearn.metrics import precision_recall_curve # <--- +++ ADDED THIS IMPORT
+from models.skin_ehdlf import skin_ehdlf_hybrid
+
+# --- CUSTOM LAYER DECAY LOGIC FOR SKINEHDLF ---
+def get_num_layer_for_skin_ehdlf(var_name, num_max_layer):
+    """
+    Splits SkinEHDLF into two groups:
+    1. Head/Fusion -> Highest Index (Base LR)
+    2. Backbones -> Lowest Index (Decayed LR)
+    """
+    if "classifier" in var_name or "fusion_layer" in var_name or "features_head" in var_name or "final_fc" in var_name:
+        return num_max_layer - 1
+    else:
+        return 0
+
+class SkinEHDLFLayerDecayValueAssigner(LayerDecayValueAssigner):
+    def get_layer_id(self, var_name):
+        return get_num_layer_for_skin_ehdlf(var_name, len(self.values))
+# ----------------------------------------------
 
 def get_args():
     parser = argparse.ArgumentParser('fine-tuning and evaluation script for image classification', add_help=False)
@@ -89,6 +117,7 @@ def get_args():
 
     # TTA
     parser.add_argument('--TTA', action='store_true', default=False)
+    parser.add_argument('--test_tta', action='store_true', default=False, help='Use TTA during final test evaluation only')
     # train monitor
     parser.add_argument('--monitor', default='acc', type=str, help='monitor used in training')
 
@@ -126,7 +155,7 @@ def get_args():
     # Augmentation parameters
     parser.add_argument('--color_jitter', type=float, default=0.4, metavar='PCT',
                         help='Color jitter factor (default: 0.4)')
-    parser.add_argument('--aa', type=str, default='', metavar='NAME',
+    parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
                         help='Use AutoAugment policy. "v0" or "original". " + "(default: rand-m9-mstd0.5-inc1)'),
     parser.add_argument('--smoothing', type=float, default=0.1,
                         help='Label smoothing (default: 0.1)')
@@ -235,6 +264,56 @@ def get_args():
 
     parser.add_argument('--exp_name', default='', type=str,
                         help='name of exp. it is helpful when save the checkpoint')
+    
+    parser.add_argument('--tune_threshold', action='store_true',
+                        help='Conditionally tune threshold for evaluation')
+    
+    parser.add_argument('--sq_root_loss', action='store_true',
+                        help='Applies square root to the loss function to stabilize training.')
+    
+    parser.add_argument('--focal_loss', action='store_true',
+                        help='Use Focal Loss instead of Cross Entropy Loss.')
+    
+
+    parser.add_argument('--no_class_weights', action='store_true',
+                        help='Disable class alpha weighting.')
+    
+    parser.add_argument('--freeze_backbone', action='store_true', help='Freeze backbone weights for linear probe.')
+
+
+    parser.add_argument('--eval_threshold', default=0.5, type=float, help='Threshold for binary classification evaluation.')
+
+    parser.add_argument('--focal_loss_gamma', default=2.0, type=float, help='Gamma parameter for Focal Loss.')
+
+    parser.add_argument('--weight_cap', default=float('inf'), type=float, help='Cap for class alpha weights to avoid extreme values.')
+
+    parser.add_argument('--custom_majority_alpha', default=None, type=float, help='Custom alpha weight for majority class in Focal Loss.')
+
+    parser.add_argument('--custom_minority_alpha', default=None, type=float, help='Custom alpha weight for minority class in Focal Loss.')
+
+    # For thesis stage 2
+    parser.add_argument('--stratify_source', action='store_true',
+                        help='Enable stratified sampling by Source (ISIC vs External) AND Label')
+
+    # For thesis stage 3
+    parser.add_argument('--val_batch_size', default=None, type=int, 
+                        help='Separate batch size for validation/test to prevent OOM during TTA')
+    parser.add_argument('--is_linear_probe', action='store_true',
+                        help='Distinguish linear probe mode.')
+    
+    parser.add_argument('--is_skinehdlf', action='store_true', default=False,
+                        help='Designates run as SkinEHDLF model.')
+    
+    parser.add_argument('--is_stage_1_ft', action='store_true', default=False,
+                        help='Designates at Stage 1 Fine-Tuning run for SkinEHDLF.')
+    
+    parser.add_argument('--is_experiment', action='store_true', default=False,
+                        help='Designates as experimental run')
+
+    parser.add_argument('--enable_online_preprocessing', action='store_true', default=False,
+                    help='Enable online preprocessing with AdvancedSkinProcessing. If disabled, assumes offline preprocessing has been done or preprocessing should not be used')
+    
+
 
     known_args, _ = parser.parse_known_args()
 
@@ -251,11 +330,52 @@ def get_args():
 
     return parser.parse_args(), ds_init
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha # Optional: You can pass your class_weights here
+        self.reduction = reduction
 
+    def forward(self, inputs, targets):
+        # Calculate standard Cross Entropy (element-wise)
+        ce_loss = F.cross_entropy(inputs, targets, weight=self.alpha, reduction='none')
+        pt = torch.exp(-ce_loss) # Get the probability of the true class
+        
+        # Apply the Focal term: (1 - pt)^gamma
+        # If pt is high (easy), (1-pt) is near 0, so loss is crushed.
+        # If pt is low (hard), (1-pt) is near 1, so loss is preserved.
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        return focal_loss
+    
+# --- FIX: Authors' Exact SkinEHDLF Augmentation Recipe ---
+# 1. Rotation +/- 30 (Paper)
+# 2. Scaling/Cropping (Paper)
+# 3. H/V Flips (Paper)
+# 4. Color Jitter: Brightness/Contrast/Sat (Paper says these specifically)
+# 5. Gaussian Noise (Paper)
+
+# Define Gaussian Noise transform
+class AddGaussianNoise(object):
+    def __init__(self, mean=0., std=0.05): # Small amount of noise
+        self.std = std
+        self.mean = mean
+        
+    def __call__(self, tensor):
+        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+    
 def main(args, ds_init):
 
-    if not args.enable_linear_eval:
-        args.aa = 'rand-m9-mstd0.5-inc1'
+    # if not args.enable_linear_eval:
+    #     args.aa = 'rand-m9-mstd0.5-inc1'
 
     print(args)
 
@@ -283,26 +403,57 @@ def main(args, ds_init):
     std = [0.228, 0.224, 0.225]
 
     normalize = transforms.Normalize(mean=mean, std=std)
-    train_trans = [
-        transforms.Resize(256),
-        transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(45),
-        transforms.ColorJitter(hue=0.2),
-        transforms.ToTensor(),
-        normalize]
 
-    val_trans = [transforms.Resize(256),
-                 transforms.CenterCrop(args.input_size),
-                 transforms.ToTensor(),
-                 normalize]
+    if not args.is_skinehdlf:
+        train_trans = [
+            transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
+            transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomRotation(45),
+            transforms.ColorJitter(hue=0.2),
+            transforms.ToTensor(),
+            normalize
+        ]
+    else:
+        train_trans = [
+            transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
+            transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)), # Scaling/Cropping
+            transforms.RandomHorizontalFlip(p=0.5), # Flipping
+            transforms.RandomVerticalFlip(p=0.5),   # Flipping
+            transforms.RandomRotation(30),          # Rotation +/- 30 (Paper)
+            # Paper: "Random modifications to brightness, contrast, and saturation"
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1), 
+            transforms.ToTensor(),
+            AddGaussianNoise(0., 0.05),             # Gaussian Noise (Paper)
+            normalize
+        ]
+
+    val_trans = [
+        transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
+        # AdvancedSkinProcessing(size=(256, 256)), # NOTE - USED FOR ONLINE PREPROCESSING (IF PREPROCESSING IS DONE OFFLINE, COMMENT THIS OUT)
+        transforms.CenterCrop(args.input_size),
+        transforms.ToTensor(),
+        normalize
+    ]
+    
+    # --- ADD THIS ---
+    # Define TTA test transforms: Resize, Crop, ToTensor, but NO normalization
+    # The TTAHandler will apply its own normalization.
+    test_trans_tta = [
+        transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
+        # AdvancedSkinProcessing(size=(256, 256)), # NOTE - USED FOR ONLINE PREPROCESSING (IF PREPROCESSING IS DONE OFFLINE, COMMENT THIS OUT)
+        transforms.CenterCrop(args.input_size),
+        transforms.ToTensor()
+    ]
+    # --- END ADD ---
 
     data_transforms = {
         'train': transforms.Compose(train_trans),
         'val': transforms.Compose(val_trans),
         # 'test': transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # uncomment it when you are testing on F17K or Daffodil
-        'test': transforms.Compose([transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
+        # 'test': transforms.Compose([transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
+        'test': transforms.Compose(test_trans_tta) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
     }
 
     if args.nb_classes == 2:
@@ -336,18 +487,55 @@ def main(args, ds_init):
 
     global_rank = utils.get_rank()
     if args.weights:
-        label_counts = dataset_train.count_label("binary_label" if binary else "label")
-        total_samples = sum(label_counts)
-        weights = [total_samples / (len(label_counts) * count) for count in label_counts]
-        weight_dict = dict(zip(label_counts.index, weights))
+        if args.stratify_source:
+            print(">>> Using Source-Stratified Sampling (4 Groups: ISIC/Ext * Benign/Mal) <<<")
+            
+            # 1. Get the training dataframe
+            # We assume dataset_train corresponds to df[df['split'] == 'train']
+            train_df = df[df['split'] == 'train'].copy()
+            
+            # 2. Identify Source (ISIC vs External)
+            # Logic: ISIC images start with 'ISIC_2024', everything else is External
+            train_df['is_isic'] = train_df['image'].astype(str).str.startswith('ISIC_2024')
+            
+            # 3. Identify Label
+            label_col = "binary_label" if binary else "label"
+            
+            # 4. Create 4 Distinct Groups
+            # Group 0: External Benign
+            # Group 1: External Malignant
+            # Group 2: ISIC Benign
+            # Group 3: ISIC Malignant
+            train_df['group'] = 0 # Default (External Benign)
+            train_df.loc[ (~train_df['is_isic']) & (train_df[label_col] == 1), 'group'] = 1
+            train_df.loc[ (train_df['is_isic']) & (train_df[label_col] == 0), 'group'] = 2
+            train_df.loc[ (train_df['is_isic']) & (train_df[label_col] == 1), 'group'] = 3
+            
+            # 5. Calculate Weights so each GROUP has equal probability
+            # (i.e., each of the 4 groups contributes 25% of the batch)
+            group_counts = train_df['group'].value_counts().sort_index()
+            print("Stratified Group Counts:", group_counts.to_dict())
+            
+            # Weight = 1 / count
+            group_weights = 1.0 / group_counts
+            
+            # Map group weights back to each sample
+            sample_weights = torch.tensor(train_df['group'].map(group_weights).values, dtype=torch.double)
+            
+            sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
+        else:
+            label_counts = dataset_train.count_label("binary_label" if binary else "label")
+            total_samples = sum(label_counts)
+            weights = [total_samples / (len(label_counts) * count) for count in label_counts]
+            weight_dict = dict(zip(label_counts.index, weights))
 
-        print('Label distribution:')
-        for label, count in label_counts.items():
-            print(f'Label {label}: {count}')
+            print('Label distribution:')
+            for label, count in label_counts.items():
+                print(f'Label {label}: {count}')
 
-        train_y = df[(df['split'] == 'train')]["binary_label" if binary else "label"].values.tolist()
-        sample_weights = torch.tensor([weight_dict[label] for label in train_y])
-        sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
+            train_y = df[(df['split'] == 'train')]["binary_label" if binary else "label"].values.tolist()
+            sample_weights = torch.tensor([weight_dict[label] for label in train_y])
+            sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
         print("Using WeightedRandomSampler")
     else:
         num_tasks = utils.get_world_size()
@@ -390,7 +578,7 @@ def main(args, ds_init):
     if dataset_val is not None:
         data_loader_val = torch.utils.data.DataLoader(
             dataset_val, sampler=sampler_val,
-            batch_size=int(1.5 * args.batch_size),
+            batch_size=int(1.5 * args.batch_size) if not args.val_batch_size else args.val_batch_size,
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=False
@@ -399,7 +587,7 @@ def main(args, ds_init):
         data_loader_val = None
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, sampler=sampler_test,
-        batch_size=args.batch_size,
+        batch_size=args.batch_size if not args.val_batch_size else args.val_batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
@@ -427,6 +615,17 @@ def main(args, ds_init):
             lin_probe=args.enable_linear_eval)
         print(model)
         patch_size = model.patch_embed.patch_size
+    elif args.model == 'SkinEHDLF_Hybrid':
+        print(f"Creating SkinEHDLF_Hybrid model with {args.nb_classes} classes...")
+        model = skin_ehdlf_hybrid(
+            num_classes=args.nb_classes,
+            pretrained=True,  # Assuming you want pretrained backbones
+            drop_rate=args.drop,
+        )
+        print(model)
+        # SkinEHDLF is a hybrid (ConvNext/EffNet/Swin) and does not have a single 'patch_embed'.
+        # We set a dummy patch_size to prevent the script from crashing in the next lines.
+        patch_size = (16, 16)
 
 
     elif args.model=='PanDerm_Base_FT':
@@ -469,8 +668,19 @@ def main(args, ds_init):
         if args.pretrained_checkpoint.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.pretrained_checkpoint, map_location='cpu', check_hash=True)
+        elif args.is_skinehdlf:
+            # FIX: Load directly into 'checkpoint' so the extraction loop below can find 'model' inside it.
+            checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) 
+
+            checkpoint_model = checkpoint
+            
+            if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
+                state_dict = checkpoint['state_dict']
+                state_dict = {k: v for k, v in state_dict.items() if 'visual' in k}
+                checkpoint = {}
+                checkpoint['model'] = {k.replace('module.visual.', 'encoder.'): v for k, v in state_dict.items()}
         else:
-            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=True)
+            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) # Weights_only changed to fix unpickling error
             checkpoint = {'model': checkpoint_model}
             if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
                 state_dict = checkpoint['state_dict']
@@ -492,33 +702,87 @@ def main(args, ds_init):
         if checkpoint_model is None:
             checkpoint_model = checkpoint
         state_dict = model.state_dict()
-        all_keys = list(checkpoint_model.keys())
-        # print("##########origin keys:", len(all_keys), all_keys)
-        # NOTE: remove all decoder keys
-        all_keys = [key for key in all_keys if key.startswith('encoder.')]
-        print("all keys:", all_keys)
-        for key in all_keys:
-            new_key = key.replace('encoder.','')
-            checkpoint_model[new_key] = checkpoint_model[key]
-            checkpoint_model.pop(key)
 
-        for key in list(checkpoint_model.keys()):
-            if key.startswith('decoder.'):
-                checkpoint_model.pop(key)
-            if key.startswith('teacher.'):
-                checkpoint_model.pop(key)
-
-        # NOTE: replace norm with fc_norm
-        for key in list(checkpoint_model.keys()):
-            if key.startswith('norm.'):
-                new_key = key.replace('norm.','fc_norm.')
+        if not args.is_skinehdlf:
+            all_keys = list(checkpoint_model.keys())
+            # print("##########origin keys:", len(all_keys), all_keys)
+            # NOTE: remove all decoder keys
+            all_keys = [key for key in all_keys if key.startswith('encoder.')]
+            print("all keys:", all_keys)
+            for key in all_keys:
+                new_key = key.replace('encoder.','')
                 checkpoint_model[new_key] = checkpoint_model[key]
                 checkpoint_model.pop(key)
 
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+            for key in list(checkpoint_model.keys()):
+                if key.startswith('decoder.'):
+                    checkpoint_model.pop(key)
+                if key.startswith('teacher.'):
+                    checkpoint_model.pop(key)
+
+            # NOTE: replace norm with fc_norm
+            for key in list(checkpoint_model.keys()):
+                if key.startswith('norm.'):
+                    new_key = key.replace('norm.','fc_norm.')
+                    checkpoint_model[new_key] = checkpoint_model[key]
+                    checkpoint_model.pop(key)
+
+            for k in ['head.weight', 'head.bias']:
+                if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+                    print(f"Removing key {k} from pretrained checkpoint")
+                    del checkpoint_model[k]
+        else:
+            # --- FIX: ROBUST KEY REMAPPING ---
+            print(">>> STARTING CHECKPOINT KEY REMAPPING <<<")
+            new_ckpt_model = {}
+            for k, v in checkpoint_model.items():
+                new_k = k
+                # 1. Strip 'module.' prefix (from DDP)
+                if new_k.startswith('module.'):
+                    new_k = new_k[7:]
+                
+                # 2. Strip 'encoder.' prefix (if present from previous save logic)
+                if new_k.startswith('encoder.'):
+                    new_k = new_k.replace('encoder.', '')
+                
+                # 3. Norm replacement (legacy support)
+                if new_k.startswith('norm.'):
+                    new_k = new_k.replace('norm.', 'fc_norm.')
+                    
+                # 4. Filter decoder/teacher keys
+                if new_k.startswith('decoder.') or new_k.startswith('teacher.'):
+                    continue
+                    
+                new_ckpt_model[new_k] = v
+                
+            checkpoint_model = new_ckpt_model
+            
+            # --- DEBUG: Print matched/unmatched keys ---
+            model_keys = set(state_dict.keys())
+            ckpt_keys = set(checkpoint_model.keys())
+            
+            matched_keys = model_keys.intersection(ckpt_keys)
+            missing_keys = model_keys - ckpt_keys
+            unexpected_keys = ckpt_keys - model_keys
+            
+            print(f"Matched Keys: {len(matched_keys)}")
+            print(f"Missing Keys: {len(missing_keys)}")
+            print(f"Unexpected Keys: {len(unexpected_keys)}")
+            
+            if len(missing_keys) > 0:
+                print(f"Sample Missing: {list(missing_keys)[:5]}")
+                
+            # Verify Classifier Head Load
+            # We specifically check for the final layer weights of SkinEHDLF
+            # head_key = 'classifier.3.weight'
+            head_key = 'final_fc.weight'
+            if head_key in matched_keys:
+                print("✅ CLASSIFIER HEAD FOUND IN CHECKPOINT! Transfer Learning should work.")
+            else:
+                print("❌ WARNING: CLASSIFIER HEAD NOT FOUND! Head will be random.")
+                if head_key in unexpected_keys:
+                    print(f"   (It was found in unexpected keys, likely a naming mismatch)")
+            # ------------------------------------------------
 
         if model.use_rel_pos_bias and "rel_pos_bias.relative_position_bias_table" in checkpoint_model:
             print("Expand the shared relative position embedding to each transformer block. ")
@@ -539,60 +803,76 @@ def main(args, ds_init):
                 rel_pos_bias = checkpoint_model[key]
                 src_num_pos, num_attn_heads = rel_pos_bias.size()
                 dst_num_pos, _ = model.state_dict()[key].size()
-                dst_patch_shape = model.patch_embed.patch_shape
-                if dst_patch_shape[0] != dst_patch_shape[1]:
-                    raise NotImplementedError()
-                num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
-                src_size = int((src_num_pos - num_extra_tokens) ** 0.5)
-                dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)
-                if src_size != dst_size:
-                    print("Position interpolate for %s from %dx%d to %dx%d" % (
-                        key, src_size, src_size, dst_size, dst_size))
-                    extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
-                    rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
 
-                    def geometric_progression(a, r, n):
-                        return a * (1.0 - r ** n) / (1.0 - r)
-
-                    left, right = 1.01, 1.5
-                    while right - left > 1e-6:
-                        q = (left + right) / 2.0
-                        gp = geometric_progression(1, q, src_size // 2)
-                        if gp > dst_size // 2:
-                            right = q
+                # FIX: Only attempt interpolation if sizes differ.
+                # This prevents accessing 'model.patch_embed' on SkinEHDLF when not needed.
+                if src_num_pos != dst_num_pos:
+                    # If we are here with SkinEHDLF, we need to find the correct patch_embed
+                    # or skip if it's too complex. For now, assume standard model structure if resizing.
+                    if hasattr(model, 'patch_embed'):
+                        dst_patch_shape = model.patch_embed.patch_shape
+                    else:
+                        # Try to find it in the swin submodule if it exists (common for hybrids)
+                        if hasattr(model, 'swin') and hasattr(model.swin, 'patch_embed'):
+                             dst_patch_shape = model.swin.patch_embed.patch_shape
                         else:
-                            left = q
+                             print(f"Warning: bias mismatch for {key} but patch_embed not found. Skipping interpolation.")
+                             continue
 
-                    dis = []
-                    cur = 1
-                    for i in range(src_size // 2):
-                        dis.append(cur)
-                        cur += q ** (i + 1)
+                    if dst_patch_shape[0] != dst_patch_shape[1]:
+                        raise NotImplementedError()
+                    num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
+                    src_size = int((src_num_pos - num_extra_tokens) ** 0.5)
+                    dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)
+                    
+                    if src_size != dst_size:
+                        print("Position interpolate for %s from %dx%d to %dx%d" % (
+                            key, src_size, src_size, dst_size, dst_size))
+                        extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
+                        rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
 
-                    r_ids = [-_ for _ in reversed(dis)]
+                        def geometric_progression(a, r, n):
+                            return a * (1.0 - r ** n) / (1.0 - r)
 
-                    x = r_ids + [0] + dis
-                    y = r_ids + [0] + dis
+                        left, right = 1.01, 1.5
+                        while right - left > 1e-6:
+                            q = (left + right) / 2.0
+                            gp = geometric_progression(1, q, src_size // 2)
+                            if gp > dst_size // 2:
+                                right = q
+                            else:
+                                left = q
 
-                    t = dst_size // 2.0
-                    dx = np.arange(-t, t + 0.1, 1.0)
-                    dy = np.arange(-t, t + 0.1, 1.0)
+                        dis = []
+                        cur = 1
+                        for i in range(src_size // 2):
+                            dis.append(cur)
+                            cur += q ** (i + 1)
 
-                    print("Original positions = %s" % str(x))
-                    print("Target positions = %s" % str(dx))
+                        r_ids = [-_ for _ in reversed(dis)]
 
-                    all_rel_pos_bias = []
+                        x = r_ids + [0] + dis
+                        y = r_ids + [0] + dis
 
-                    for i in range(num_attn_heads):
-                        z = rel_pos_bias[:, i].view(src_size, src_size).float().numpy()
-                        f = interpolate.interp2d(x, y, z, kind='cubic')
-                        all_rel_pos_bias.append(
-                            torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device))
+                        t = dst_size // 2.0
+                        dx = np.arange(-t, t + 0.1, 1.0)
+                        dy = np.arange(-t, t + 0.1, 1.0)
 
-                    rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                        print("Original positions = %s" % str(x))
+                        print("Target positions = %s" % str(dx))
 
-                    new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
-                    checkpoint_model[key] = new_rel_pos_bias
+                        all_rel_pos_bias = []
+
+                        for i in range(num_attn_heads):
+                            z = rel_pos_bias[:, i].view(src_size, src_size).float().numpy()
+                            f = interpolate.interp2d(x, y, z, kind='cubic')
+                            all_rel_pos_bias.append(
+                                torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device))
+
+                        rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+
+                        new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
+                        checkpoint_model[key] = new_rel_pos_bias
 
         print("##############new keys:", len(checkpoint_model), checkpoint_model.keys())
 
@@ -601,6 +881,16 @@ def main(args, ds_init):
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
 
     model.to(device)
+
+    # --- FIX: EXPLICITLY FREEZE BACKBONE FOR LINEAR PROBE ---
+    if args.freeze_backbone:
+        print("Info: Enabling Linear Eval. Freezing backbone weights...")
+        for name, param in model.named_parameters():
+            if 'head' not in name and 'classifier' not in name and 'fusion_layer' not in name and 'features_head' not in name and 'final_fc' not in name:
+                param.requires_grad = False
+            else:
+                print(f"Keeping {name} unfrozen.")
+    # --------------------------------------------------------
 
     model_ema = None
     if args.model_ema:
@@ -629,7 +919,18 @@ def main(args, ds_init):
 
     num_layers = model_without_ddp.get_num_layers()
     if args.layer_decay < 1.0:
-        assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
+        if args.is_skinehdlf:
+            # Special handling for SkinEHDLF hybrid model
+            # We enforce a fake depth of 7 to get roughly 0.1x decay at the bottom (0.75^8 ~= 0.1)
+            # Layer 0: Backbone (0.1x LR)
+            # Layer Max: Head (1.0x LR)
+            fake_num_layers = 7
+            assigner = SkinEHDLFLayerDecayValueAssigner(
+                list(args.layer_decay ** (fake_num_layers + 1 - i) for i in range(fake_num_layers + 2))
+            )
+            print(f"Using SkinEHDLF Layer Decay with {fake_num_layers} virtual layers.")
+        else:
+            assigner = LayerDecayValueAssigner(list(args.layer_decay ** (num_layers + 1 - i) for i in range(num_layers + 2)))
     else:
         assigner = None
 
@@ -659,13 +960,19 @@ def main(args, ds_init):
         if args.distributed:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model_without_ddp = model.module
-
-        optimizer = create_optimizer(
-            args, model_without_ddp, skip_list=skip_weight_decay_list,
-            get_num_layer=assigner.get_layer_id if assigner is not None else None,
-            get_layer_scale=assigner.get_scale if assigner is not None else None)
-        loss_scaler = NativeScaler()
-
+        
+        # --- MODIFICATION: Optimizer and Loss Scaler are only created if NOT in --eval mode ---
+        if not args.eval:
+            optimizer = create_optimizer(
+                args, model_without_ddp, skip_list=skip_weight_decay_list,
+                get_num_layer=assigner.get_layer_id if assigner is not None else None,
+                get_layer_scale=assigner.get_scale if assigner is not None else None)
+            loss_scaler = NativeScaler()
+        else:
+            optimizer = None
+            loss_scaler = None
+    
+    # --- This block only runs if we are in TRAINING mode ---
     if not args.eval:
         print("Use step level LR scheduler!")
 
@@ -682,21 +989,72 @@ def main(args, ds_init):
         # MODIFICATION: Calculate class weights and apply them to the loss function
         label_counts = dataset_train.count_label("binary_label" if binary else "label")
         total_samples = sum(label_counts)
-        class_weights_list = [total_samples / (len(label_counts) * count) for count in label_counts]
-        class_weights = torch.tensor(class_weights_list, device=device)
-        # print("Using Class Weights for Loss:", class_weights)
 
-        if mixup_fn is not None:
-            # smoothing is handled with mixup label transform
-            criterion = SoftTargetCrossEntropy()
-        elif args.smoothing > 0.:
-            criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+        # Applies a weight cap to avoid extremely high weights, which could destabilize training
+        weight_cap = args.weight_cap 
+
+        # --- FIX: Match SkinEHDLF "Cross-Weighted Loss" + Sigmoid ---
+        if args.is_skinehdlf and args.nb_classes == 2:
+            # For Binary (Sigmoid), "Cross-Weighted" means weighting the Positive class 
+            # to balance the loss contribution.
+            # Formula: pos_weight = Number_Negative / Number_Positive
+            
+            pos_weight_tensor = None
+            if not args.no_class_weights: # Only calculate pos_weight if class weights are enabled
+                if args.custom_majority_alpha and args.custom_minority_alpha:
+                    # NOTE - Indicating custom_minority_ or _majority_alpha means "I want to set a specific pos_weight ratio instead of calculating it from the data" in the sigmoid function case. Names are consistent with the softmax function case for backwards compatibility
+                    pos_weight_val = args.custom_minority_alpha / args.custom_majority_alpha
+                else:
+                    n_neg = label_counts[0]
+                    n_pos = label_counts[1]
+                    pos_weight_val = n_neg / n_pos
+                
+                # Cap the weight if needed (to prevent instability if imbalance is extreme)
+                if args.weight_cap is not None:
+                    pos_weight_val = min(pos_weight_val, args.weight_cap)
+                    
+                pos_weight_tensor = torch.tensor(pos_weight_val, device=device)
+            
+            if pos_weight_tensor:
+                print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: {pos_weight_val:.4f}")
+            else:
+                print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: None")
+
+            
+            # BCEWithLogitsLoss combines Sigmoid + Weighted BCELoss
+            # Note: This expects targets to be float, which we handle in the training loop
+            criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+            
         else:
-            # Apply the calculated class weights here
-            print("Using Class Weights for Loss:", class_weights)
-            # NOTE - This might be the best way to address imbalanced datasets
-            criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            # Multi-class Fallback (Softmax + Class Weights) [or PanDerm]
+            class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
 
+            # --- FIX: Use square root of inverse frequency to soften extreme weights ---
+            # class_weights_list = [(total_samples / (len(label_counts) * count))**0.5 for count in label_counts]
+
+            class_weights = torch.tensor(class_weights_list if (not args.custom_majority_alpha or not args.custom_minority_alpha) else [args.custom_majority_alpha, args.custom_minority_alpha], device=device)
+            # print("Using Class Weights for Loss:", class_weights)
+
+            if mixup_fn is not None:
+                # smoothing is handled with mixup label transform
+                if not args.no_class_weights:
+                    print("Using Weighted Cross Entropy for Mixup with weights:", class_weights)
+                    # PyTorch CrossEntropyLoss handles Soft Targets (N, C) automatically
+                    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+                else:
+                    criterion = SoftTargetCrossEntropy()
+            elif args.smoothing > 0.:
+                criterion = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+            elif args.focal_loss:
+                if not args.no_class_weights:
+                    print("Using Focal Loss with Class Weights:", class_weights)
+                criterion = FocalLoss(gamma=args.focal_loss_gamma, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
+            else:
+                # Apply the calculated class weights here
+                if not args.no_class_weights:
+                    print("Using Class Weights for Loss:", class_weights)
+                # NOTE - This might be the best way to address imbalanced datasets
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights if not args.no_class_weights else None)
 
         print("criterion = %s" % str(criterion))
 
@@ -704,25 +1062,143 @@ def main(args, ds_init):
             args=args, model=model, model_without_ddp=model_without_ddp,
             optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
 
+    # --- +++ CORRECTED AND UNIFIED args.eval BLOCK +++ ---
     elif args.eval:
         epoch=0
         model_weight = args.resume
-        model_dict = torch.load(model_weight)
-        model.load_state_dict(model_dict['model'])
+        model_dict = torch.load(model_weight, map_location=device, weights_only=False)
+        
+        # --- FIX: REMAP KEYS FOR LEGACY CHECKPOINTS (Evaluation Mode) ---
+        # The user is loading a checkpoint trained with "classifier.*" (old head)
+        # into a model expecting "features_head.*" and "final_fc.*" (new split head).
+        
+        state_dict = model_dict['model']
+        new_state_dict = {}
+        print(">>> Checking for key mismatch in checkpoint... <<<")
+        
+        remapped_count = 0
+        for k, v in state_dict.items():
+            if k.startswith('classifier.'):
+                # We found legacy keys! Remap them.
+                parts = k.split('.')
+                # Structure: classifier.{layer_idx}.{weight/bias}
+                if len(parts) >= 3:
+                    layer_idx = int(parts[1])
+                    suffix = parts[2]
+                    
+                    # Logic: The last layer (15) is the final linear layer -> final_fc
+                    # All previous layers (0, 3, 6, 9, 12) -> features_head
+                    if layer_idx == 15:
+                        new_key = f"final_fc.{suffix}"
+                    else:
+                        new_key = f"features_head.{layer_idx}.{suffix}"
+                    
+                    new_state_dict[new_key] = v
+                    remapped_count += 1
+                else:
+                    # Fallback if structure is weird
+                    new_state_dict[k] = v
+            else:
+                new_state_dict[k] = v
+                
+        if remapped_count > 0:
+            print(f">>> Successfully remapped {remapped_count} keys from 'classifier' to 'features_head/final_fc'.")
+        
+        # Load the (potentially modified) state dict
+        model.load_state_dict(new_state_dict)
+        # ----------------------------------------------------------------
+        
+        best_threshold = args.eval_threshold  # Default threshold if not tuning
+        if args.tune_threshold:
+            print("\n--- EVALUATION-ONLY MODE WITH THRESHOLD TUNING ---")
+            
+            # --- (UNIFIED) STEP 1: Get probabilities from VAL set to find threshold ---
+            print("Running on validation set to find best threshold (using standard eval)...")
+            # We *always* use the standard (non-TTA) validation loader to find the threshold.
+            # The 'evaluate' function now returns metrics, wandb_res, prediction_array, true_label_decode_array
+            _, _, val_probs, val_labels = evaluate(
+                data_loader_val, model, device, args.output_dir, epoch, 
+                mode='val_tune', num_class=args.nb_classes, decision_threshold=None, is_skinehdlf=args.is_skinehdlf
+            )
+
+            # --- (UNIFIED) STEP 2: Calculate best threshold (Targeting a Specific Recall) ---
+            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+            print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
+            
+            # Handle binary case specifically for threshold finding
+            # if args.nb_classes == 2:
+            val_probs_positive = val_probs[:, 1]
+            # else:
+            #     # Fallback for multi-class (conceptually trickier, assumes class 1 is positive)
+            #     val_probs_positive = val_probs[:, 1]
+
+            precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
+
+            try:
+                # Find the last index where recall is >= your target
+                # (The arrays are sorted by recall, descending, so [0] is highest recall)
+                # We find the *last* index ([0][-1]) which has the highest precision 
+                # *while still meeting* our recall target.
+                target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
+                best_threshold = thresholds[target_recall_index]
+                
+                print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
+                print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
+                print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+
+            except IndexError:
+                # Fallback if target recall is never achieved
+                print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
+                f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+                best_threshold = thresholds[np.argmax(f1_scores)]
+
+            print(f"Using threshold: {best_threshold:.4f}")
+            
+            # --- +++ ADDED THIS MEMORY CLEANUP +++ ---
+            # --- This is the key fix for the args.eval path ---
+            print("Clearing validation probability arrays...")
+            try:
+                del val_probs
+                del val_labels
+                del precisions
+                del recalls
+                del thresholds
+            except Exception as e:
+                print(f"Could not delete val arrays: {e}")
+                
+            torch.cuda.empty_cache() # Clear cache before final test run
+            # --- +++ END MEMORY CLEANUP +++ ---
+
+        # --- (UNIFIED) STEP 3: Run on TEST set using the tuned threshold ---
         if args.TTA:
-            print(f"Starting evaluation with tta")
-            test_res, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch, mode='test',
-                                                num_class=args.nb_classes)
+            print(f"Starting TEST evaluation with TTA (using threshold={best_threshold:.4f})")
+            test_stats, _, _, _ = evaluate_tta(
+                data_loader_test, model, device, args.output_dir, epoch,
+                mode='test', num_class=args.nb_classes,
+                decision_threshold=best_threshold, # <-- Pass tuned threshold
+                is_skinehdlf=args.is_skinehdlf
+            )
         else:
-            print(f"Starting evaluation without tta")
-            test_res, wandb_res = evaluate(data_loader_test, model, device,args.output_dir, epoch, mode='test',
-                                        num_class=args.nb_classes)
-            print('TTTTTTTTT',test_res)
-
+            print(f"Starting TEST evaluation without TTA (using threshold={best_threshold:.4f})")
+            test_stats, wandb_test, _, _ = evaluate(
+                data_loader_test, model, device, args.output_dir, epoch, 
+                mode='test', num_class=args.nb_classes,
+                decision_threshold=best_threshold, # <-- Pass tuned threshold
+                is_skinehdlf=args.is_skinehdlf
+            )
+            print("Logging final test metrics (with tuned threshold) to wandb...")
+            wandb.log(wandb_test)
+        
+        print("Final Tuned Test Metrics:", test_stats)
         exit(0)
+    # --- +++ END CORRECTED BLOCK +++ ---
+    
     else:
-        print(args.eval)
+        # This else should not be reachable if logic is correct
+        print("Error: --eval flag was not processed correctly.")
+        exit(1)
 
+    # --- This block only runs if we are in TRAINING mode ---
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
@@ -745,20 +1221,37 @@ def main(args, ds_init):
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
             args=args
         )
-        val_stats, wandb_res = evaluate(data_loader_val, model, device, args.output_dir, epoch, mode='val',
-                                        num_class=args.nb_classes)
+        # Note: evaluate() now returns: metrics, wandb_res, prediction_array, true_label_decode_array
+        val_stats, wandb_res, _, _ = evaluate(
+            data_loader_val, model, device, args.output_dir, epoch, mode='val',
+            num_class=args.nb_classes, decision_threshold=None, # Use default threshold for epoch-to-epoch saving
+            is_skinehdlf=args.is_skinehdlf
+        )
         print('--------------------------',wandb_res)
-        # val_bacc, val_auc_roc, valwf1,val_sen,val_spec = wandb_res['Val Balanced Accuracy'], wandb_res['Val AUC-ROC'], wandb_res['Val F1'],wandb_res['Val Sensitivity'],wandb_res['Val Specificity']
         val_bacc, val_acc, val_auc_roc, valwf1, val_mean_recall = wandb_res['Val BAcc'], wandb_res['Val Acc'] , wandb_res['Val ROC'], \
             wandb_res['Val W_F1'], wandb_res['Val Recall_macro']
         wandb.log(wandb_res)
+
+        checkpoint_suffix_best = "best"
+        checkpoint_suffix_last = "last"
+        if args.is_linear_probe:
+            checkpoint_suffix_best = "best-lp"
+            checkpoint_suffix_last = "last-lp"
+        elif args.is_stage_1_ft:
+            checkpoint_suffix_best = "best-stage-1"
+            checkpoint_suffix_last = "last-stage-1"
+
+        if args.is_experiment:
+            checkpoint_suffix_best = checkpoint_suffix_best + '-experiment'
+            checkpoint_suffix_last = checkpoint_suffix_last + '-experiment'
+
         if args.nb_classes == 2:
             if max_performance < val_auc_roc:
                 max_performance = val_auc_roc
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
             print(f'Max AUCROC: {max_performance:.2f}%')
         elif args.monitor == 'acc':
 
@@ -767,7 +1260,7 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
             print(f'Max val mean accuracy: {max_performance:.2f}%') 
 
         elif args.monitor == 'recall':
@@ -776,23 +1269,112 @@ def main(args, ds_init):
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch='best', model_ema=model_ema)
+                        loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
             print(f'Max val mean recall: {max_performance:.2f}%')
 
+        # --- +++ ADD THIS BLOCK +++ ---
+        # Always save the latest epoch as 'checkpoint-last.pth'
+        if args.output_dir:
+            utils.save_model(
+                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch=checkpoint_suffix_last, model_ema=model_ema)
+        # --- +++ END BLOCK +++ ---
+
+        # --- +++ MODIFIED FINAL EVALUATION BLOCK (WITH MEMORY CLEANUP) +++ ---
         if epoch == (args.epochs - 1):
+            print("\n--- FINAL EVALUATION ---")
+            
+            # --- STEP 1: Free all unnecessary training memory ---
+            # The optimizer and loss_scaler are the biggest memory hogs
+            print("Clearing training tensors (optimizer, loss_scaler) from GPU memory...")
+            try:
+                del optimizer
+                del loss_scaler
+            except Exception as e:
+                print(f"Could not delete optimizer/loss_scaler: {e}")
+
+            # Clear the CUDA cache to free up fragmented memory
+            torch.cuda.empty_cache()
+
+            print("Loading best checkpoint (checkpoint-best.pth)...")
             model_weight = args.output_dir + '/' + 'checkpoint-best.pth'
-            model_dict = torch.load(model_weight)
+            model_dict = torch.load(model_weight, map_location=device, weights_only=False)
             model.load_state_dict(model_dict['model'])
-            if args.TTA:
-                print(f"Starting test with tta")
-                test_stats, _ = evaluate_tta(data_loader_test, model, device, args.output_dir, epoch,
-                                                    mode='test',
-                                                    num_class=args.nb_classes)
+
+            best_threshold = 0.5  # Default threshold if not tuning
+            if args.tune_threshold:
+                # --- STEP 2: Get probabilities from VAL set to find threshold ---
+                print("Running on validation set to find best threshold...")
+                _, _, val_probs, val_labels = evaluate(
+                    data_loader_val, model, device, args.output_dir, epoch, 
+                    mode='val_tune', num_class=args.nb_classes, decision_threshold=None, is_skinehdlf=args.is_skinehdlf
+                )
+
+                # --- STEP 3: Calculate best threshold (Targeting a Specific Recall) ---
+                TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+                print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
+                
+                # Handle binary case
+                # if args.nb_classes == 2:
+                val_probs_positive = val_probs[:, 1]
+                # else:
+                #     val_probs_positive = val_probs[:, 1]
+                    
+                precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
+
+                try:
+                    # Find the last index where recall is >= your target
+                    target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
+                    best_threshold = thresholds[target_recall_index]
+                    
+                    print(f"Found threshold for >= {TARGET_RECALL*100}% recall: {best_threshold:.4f}")
+                    print(f"  > Precision at this threshold: {precisions[target_recall_index]:.4f}")
+                    print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
+
+                except IndexError:
+                    # Fallback if target recall is never achieved
+                    print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
+                    f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
+                    best_threshold = thresholds[np.argmax(f1_scores)]
+
+                print(f"Using threshold: {best_threshold:.4f}")
+
+                # --- STEP 4: Free the validation arrays from memory ---
+                print("Clearing validation probability arrays...")
+                try:
+                    del val_probs
+                    del val_labels
+                    del precisions
+                    del recalls
+                    del thresholds
+                except Exception as e:
+                    print(f"Could not delete val arrays: {e}")
+                
+                torch.cuda.empty_cache() # Clear cache again before final test run
+
+            # --- STEP 5: Run on TEST set using the tuned threshold ---
+            if args.TTA or args.test_tta:
+                print(f"Starting test with TTA (using threshold={best_threshold:.4f})")
+                test_stats, _, _, _ = evaluate_tta(
+                    data_loader_test, model, device, args.output_dir, epoch,
+                    mode='test', num_class=args.nb_classes,
+                    decision_threshold=best_threshold, # <-- Pass tuned threshold
+                    is_skinehdlf=args.is_skinehdlf
+                )
             else:
-                print(f"Starting test without tta")
-                test_stats, wandb_test = evaluate(data_loader_test, model, device, args.output_dir, epoch, mode='test',
-                                                  num_class=args.nb_classes)
+                print(f"Starting test without TTA (using threshold={best_threshold:.4f})")
+                test_stats, wandb_test, _, _ = evaluate(
+                    data_loader_test, model, device, args.output_dir, epoch, 
+                    mode='test', num_class=args.nb_classes,
+                    decision_threshold=best_threshold, # <-- Pass tuned threshold
+                    is_skinehdlf=args.is_skinehdlf
+                )
+                print("Logging final test metrics (with tuned threshold) to wandb...")
                 wandb.log(wandb_test)
+            
+            print("Final Tuned Test Metrics:", test_stats)
+        # --- +++ END MODIFIED BLOCK +++ ---
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))

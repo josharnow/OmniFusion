@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=panderm_%a
-#SBATCH --output=../../logs/phase_1/finetune_job_%A_%a.out
-#SBATCH --error=../../logs/phase_1/finetune_job_%A_%a.err
+#SBATCH --output=../../logs/phase_2/finetune_job_%A_%a.out
+#SBATCH --error=../../logs/phase_2/finetune_job_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 
 # --- Set the number of splits for your array ---
-#SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
+#SBATCH --array=1-1%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
 
 
 
@@ -15,10 +15,9 @@
 PYTHON="python3"
 MODEL="PanDerm_Large_FT" # Base model to start fine-tuning from
 NB_CLASSES=2
-OUTPUT_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_1"
-# CSV_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/ISIC 2024 (SLICE-3D)/ISIC_2024_Training_GroundTruth.csv"
-CSV_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_1" # IMPORTANT: Directory containing your fold_data.csv files
-ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/ISIC 2024 (SLICE-3D)/ISIC_2024_Training_Input/"
+OUTPUT_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_2"
+CSV_BASE_DIR="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_2" # IMPORTANT: Directory containing your fold_data.csv files
+ROOT_PATH="/home/PACE/ja50529n/MS Thesis/Thesis Data/Skin Cancer Project/PanDerm & SkinEHDLF/phase_2/images/"
 # Below is the pretrained checkpoint for the ENTIRE PanDerm dataset (DO NOT USE FOR THESIS)
 # PRETRAINED_CHECKPOINT="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/pretrain_weight/panderm_ll_data6_checkpoint-499.pth"
 # Below is the pretrained checkpoint for Imagenet, which the authors used for their pretraining prior to training on the entire dataset from their paper (USE FOR THESIS)
@@ -63,25 +62,12 @@ mkdir -p logs
 echo "Starting job on " `date`
 echo "Running on node " `hostname`
 
-# Purge modules to ensure a clean environment
-# module purge
-
-# Load the required CUDA and NCCL modules
-# module load cuda
-# module load nccl
-# module load cuda/12.1
-# module load nccl/2.11.4 
-
-# export LD_LIBRARY_PATH="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/venv/lib/python3.9/site-packages/nvidia/nccl/lib:$LD_LIBRARY_PATH"
-# export LD_LIBRARY_PATH="/opt/nvidia/cuda-12.8/lib64:$LD_LIBRARY_PATH"
 
 export LD_LIBRARY_PATH="/opt/nvidia/cuda-12.8/lib64:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/venv/lib/python3.9/site-packages/nvidia/nccl/lib:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/venv/lib/python3.9/site-packages/nvidia/cusparselt/lib:$LD_LIBRARY_PATH"
 
-# Purge any modules to ensure a clean environment
-# module purge
-# module load cuda/12.8
+
 
 echo "Visible CUDA device environment variables: $CUDA_VISIBLE_DEVICES"
 echo "Starting fine-tuning job for Fold ${SLURM_ARRAY_TASK_ID} on $(hostname)"
@@ -124,8 +110,6 @@ ${PYTHON} run_class_finetuning.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
@@ -136,11 +120,14 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --lr 1e-2 \
     --warmup_epochs 2 \
-    --epochs 20 \
+    --epochs 10 \
     --enable_linear_eval \
     --freeze_backbone \
-    --focal_loss \
-    --no_class_weights
+    --stratify_source \
+    --no_class_weights 
+    # --focal_loss \
+    # --mixup ${MIXUP} \
+    # --cutmix ${CUTMIX}
 
 
 # --- Run the Fine-Tuning Script (loads best checkpoint weights produced by linear probing warmup) ---
@@ -161,8 +148,6 @@ ${PYTHON} run_class_finetuning.py \
     --layer_decay ${LAYER_DECAY} \
     --drop_path ${DROP_PATH} \
     --weight_decay ${WEIGHT_DECAY} \
-    --mixup ${MIXUP} \
-    --cutmix ${CUTMIX} \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
@@ -172,10 +157,17 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase2_FT" \
     --aa 'rand-m9-mstd0.5-inc1' \
-    --focal_loss \
-    --focal_loss_gamma 4.0 \
-    --enable_linear_eval \
-    --no_class_weights
+    --stratify_source \
+    --no_class_weights \
+    --mixup 0.8 \
+    --cutmix 1.0 \
+    --mixup_prob 1.0 \
+    --mixup_switch_prob 0.5 \
+    --mixup_mode "batch" \
+    # --mixup ${MIXUP} \
+    # --cutmix ${CUTMIX} \
+    # --focal_loss \
+    # --focal_loss_gamma 4.0 \
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 

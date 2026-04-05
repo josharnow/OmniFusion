@@ -1,0 +1,6 @@
+# This file contains a list of known images that break validation due to obstructions leading to NaN. They MUST be removed from fold_data.csv if they appear in the validation (and possibly test) set for a particular fold:
+
+ISIC_2024__ISIC_3970343.jpg
+ISIC_2024__ISIC_5523902.jpg
+ISIC_2024__ISIC_7358578.jpg
+ISIC_2024__ISIC_4884516.jpg
