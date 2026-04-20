@@ -314,6 +314,9 @@ def get_args():
                     help='Enable online preprocessing with AdvancedSkinProcessing. If disabled, assumes offline preprocessing has been done or preprocessing should not be used')
     
 
+    parser.add_argument('--is_domain_shift', action='store_true',
+                    help='Distinguish domain shift few-shot evaluation runs (e.g. ISIC-only training with External test set)')
+
 
     known_args, _ = parser.parse_known_args()
 
@@ -1240,6 +1243,9 @@ def main(args, ds_init):
         elif args.is_stage_1_ft:
             checkpoint_suffix_best = "best-stage-1"
             checkpoint_suffix_last = "last-stage-1"
+        elif args.is_domain_shift:
+            checkpoint_suffix_best = "best-domain-shift"
+            checkpoint_suffix_last = "last-domain-shift"
 
         if args.is_experiment:
             checkpoint_suffix_best = checkpoint_suffix_best + '-experiment'
