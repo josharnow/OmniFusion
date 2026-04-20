@@ -4,7 +4,8 @@ import numpy as np
 from sklearn.metrics import confusion_matrix, roc_curve
 from tqdm import tqdm
 
-BASE_PATH = "/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3"
+# BASE_PATH = "/home/PACE/ja50529n/MS Thesis/Model/PanDerm/output/phase_3"
+BASE_PATH = "/Users/josh/Downloads/untitled folder 13/Model 2-DS"
 
 # Set to True to save a new CSV with predicted_label re-applied at the best threshold
 SAVE_RETHRESHOLDED_CSV = True

@@ -747,6 +747,17 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     all_targets_np = np.array(all_targets)
     all_preds_np = np.array(all_preds)
     all_logits_np = np.array(logits)
+    all_probs_np = np.array([r['probabilities'] for r in results]) # Extract averaged probs
+
+    # --- ADDED: AUROC Calculation ---
+    try:
+        if num_class == 2:
+            auc_roc = roc_auc_score(all_targets_np, all_probs_np[:, 1])
+        else:
+            auc_roc = roc_auc_score(all_targets_np, all_probs_np, multi_class='ovr', average='macro')
+    except Exception as e:
+        print(f"Warning: Could not calculate AUROC: {e}")
+        auc_roc = 0.0
 
     # --- FIX: Separated binary vs multiclass Sens/Spec calculation ---
     if num_class == 2:
@@ -786,6 +797,7 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     metrics = {
         'balanced_accuracy': balanced_accuracy_score(all_targets_np, all_preds_np),
         'accuracy': accuracy_score(all_targets_np, all_preds_np),
+        'auc_roc': auc_roc, # <--- ADDED
         'top3_acc' : top3_acc,
         'top5_acc' : top5_acc,
         'sensitivity': macro_sensitivity,
@@ -794,7 +806,11 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
         'recall_macro': recall_score(all_targets_np, all_preds_np, average='macro'),
         'recall_weighted': recall_score(all_targets_np, all_preds_np, average='weighted'),
     }
-    print(metrics)
+    
+    # --- UPDATED: Output logging statement ---
+    print('------------- TTA ', mode, ' -------------')
+    print('Metrics - BAcc: {:.4f} Acc: {:.4f} AUC-ROC: {:.4f} Sens: {:.4f} Spec: {:.4f}'.format(
+        metrics['balanced_accuracy'], metrics['accuracy'], metrics['auc_roc'], metrics['sensitivity'], metrics['specificity']))
 
     # Save results to CSV
     output_csv_path = os.path.join(out_dir, f"{mode}.csv")
