@@ -997,7 +997,7 @@ def main(args, ds_init):
         weight_cap = args.weight_cap 
 
         # --- FIX: Match SkinEHDLF "Cross-Weighted Loss" + Sigmoid ---
-        if args.is_skinehdlf and args.nb_classes == 2:
+        if args.is_skinehdlf and args.nb_classes == 2 and not args.focal_loss:
             # For Binary (Sigmoid), "Cross-Weighted" means weighting the Positive class 
             # to balance the loss contribution.
             # Formula: pos_weight = Number_Negative / Number_Positive

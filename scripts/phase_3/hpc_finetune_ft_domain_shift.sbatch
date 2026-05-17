@@ -142,7 +142,6 @@ ${PYTHON} run_class_finetuning.py \
     --clip_grad 1.0 \
     --wandb_name "EXPERIMENT_Fold_1_Phase3_FT" \
     --aa "${aa}" \
-    --stratify_source \
     --mixup ${MIXUP} \
     --cutmix ${CUTMIX} \
     --mixup_prob 1.0 \
@@ -154,7 +153,7 @@ ${PYTHON} run_class_finetuning.py \
     --is_skinehdlf \
     --opt "adamw" \
     --no_auto_resume \
-    --weights \
+    --disable_amp \
     --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1-target.pth" \
     --is_domain_shift
     # --custom_majority_alpha 1.0 \
