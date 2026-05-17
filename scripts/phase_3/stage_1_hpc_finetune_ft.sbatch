@@ -152,11 +152,10 @@ ${PYTHON} run_class_finetuning.py \
     --opt "adamw" \
     --no_auto_resume \
     --weights \
-    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-lp.pth" \
+    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/checkpoint-best-lp.pth" \
     --custom_majority_alpha 1.0 \
     --custom_minority_alpha 2.0 \
     --is_stage_1_ft 
-    # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
 
     # --sq_root_loss \
     # --weights \
