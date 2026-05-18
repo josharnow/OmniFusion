@@ -1,4 +1,3 @@
-# Add these imports at the top of the file
 import os
 # This respects SLURM/Docker resource limits (best for HPC)
 try:
@@ -56,7 +55,7 @@ import torch.nn.functional as F
 from torch import nn
 import furnace.utils as utils
 from scipy import interpolate
-from sklearn.metrics import precision_recall_curve # <--- +++ ADDED THIS IMPORT
+from sklearn.metrics import precision_recall_curve 
 from models.skin_ehdlf import skin_ehdlf_hybrid
 
 # --- CUSTOM LAYER DECAY LOGIC FOR SKINEHDLF ---
@@ -280,15 +279,10 @@ def get_args():
     
     parser.add_argument('--freeze_backbone', action='store_true', help='Freeze backbone weights for linear probe.')
 
-
     parser.add_argument('--eval_threshold', default=0.5, type=float, help='Threshold for binary classification evaluation.')
-
     parser.add_argument('--focal_loss_gamma', default=2.0, type=float, help='Gamma parameter for Focal Loss.')
-
     parser.add_argument('--weight_cap', default=float('inf'), type=float, help='Cap for class alpha weights to avoid extreme values.')
-
     parser.add_argument('--custom_majority_alpha', default=None, type=float, help='Custom alpha weight for majority class in Focal Loss.')
-
     parser.add_argument('--custom_minority_alpha', default=None, type=float, help='Custom alpha weight for minority class in Focal Loss.')
 
     # For thesis stage 2
@@ -311,12 +305,14 @@ def get_args():
                         help='Designates as experimental run')
 
     parser.add_argument('--enable_online_preprocessing', action='store_true', default=False,
-                    help='Enable online preprocessing with AdvancedSkinProcessing. If disabled, assumes offline preprocessing has been done or preprocessing should not be used')
+                        help='Enable online preprocessing with AdvancedSkinProcessing. If disabled, assumes offline preprocessing has been done or preprocessing should not be used')
     
-
     parser.add_argument('--is_domain_shift', action='store_true',
-                    help='Distinguish domain shift few-shot evaluation runs (e.g. ISIC-only training with External test set)')
+                        help='Distinguish domain shift few-shot evaluation runs (e.g. ISIC-only training with External test set)')
 
+    # --- EARLY STOPPING CONFIGURATION ---
+    parser.add_argument('--patience', default=-1, type=int,
+                        help='Early stopping patience threshold (default: 15 epochs). Set to -1 to disable.')
 
     known_args, _ = parser.parse_known_args()
 
@@ -337,17 +333,12 @@ class FocalLoss(nn.Module):
     def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
-        self.alpha = alpha # Optional: You can pass your class_weights here
+        self.alpha = alpha 
         self.reduction = reduction
 
     def forward(self, inputs, targets):
-        # Calculate standard Cross Entropy (element-wise)
         ce_loss = F.cross_entropy(inputs, targets, weight=self.alpha, reduction='none')
-        pt = torch.exp(-ce_loss) # Get the probability of the true class
-        
-        # Apply the Focal term: (1 - pt)^gamma
-        # If pt is high (easy), (1-pt) is near 0, so loss is crushed.
-        # If pt is low (hard), (1-pt) is near 1, so loss is preserved.
+        pt = torch.exp(-ce_loss) 
         focal_loss = ((1 - pt) ** self.gamma) * ce_loss
 
         if self.reduction == 'mean':
@@ -356,16 +347,9 @@ class FocalLoss(nn.Module):
             return focal_loss.sum()
         return focal_loss
     
-# --- FIX: Authors' Exact SkinEHDLF Augmentation Recipe ---
-# 1. Rotation +/- 30 (Paper)
-# 2. Scaling/Cropping (Paper)
-# 3. H/V Flips (Paper)
-# 4. Color Jitter: Brightness/Contrast/Sat (Paper says these specifically)
-# 5. Gaussian Noise (Paper)
-
 # Define Gaussian Noise transform
 class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=0.05): # Small amount of noise
+    def __init__(self, mean=0., std=0.05): 
         self.std = std
         self.mean = mean
         
@@ -376,10 +360,6 @@ class AddGaussianNoise(object):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
     
 def main(args, ds_init):
-
-    # if not args.enable_linear_eval:
-    #     args.aa = 'rand-m9-mstd0.5-inc1'
-
     print(args)
 
     print("Before entering init_distributed_mode function")
@@ -397,7 +377,6 @@ def main(args, ds_init):
     seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
-    # random.seed(seed)
 
     cudnn.benchmark = True
 
@@ -421,42 +400,33 @@ def main(args, ds_init):
     else:
         train_trans = [
             transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
-            transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)), # Scaling/Cropping
-            transforms.RandomHorizontalFlip(p=0.5), # Flipping
-            transforms.RandomVerticalFlip(p=0.5),   # Flipping
-            transforms.RandomRotation(30),          # Rotation +/- 30 (Paper)
-            # Paper: "Random modifications to brightness, contrast, and saturation"
+            transforms.RandomResizedCrop(args.input_size, scale=(0.75, 1.0)), 
+            transforms.RandomHorizontalFlip(p=0.5), 
+            transforms.RandomVerticalFlip(p=0.5),   
+            transforms.RandomRotation(30),          
             transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1), 
             transforms.ToTensor(),
-            AddGaussianNoise(0., 0.05),             # Gaussian Noise (Paper)
+            AddGaussianNoise(0., 0.05),             
             normalize
         ]
 
     val_trans = [
         transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
-        # AdvancedSkinProcessing(size=(256, 256)), # NOTE - USED FOR ONLINE PREPROCESSING (IF PREPROCESSING IS DONE OFFLINE, COMMENT THIS OUT)
         transforms.CenterCrop(args.input_size),
         transforms.ToTensor(),
         normalize
     ]
     
-    # --- ADD THIS ---
-    # Define TTA test transforms: Resize, Crop, ToTensor, but NO normalization
-    # The TTAHandler will apply its own normalization.
     test_trans_tta = [
         transforms.Resize(256) if not args.enable_online_preprocessing else AdvancedSkinProcessing(size=(256, 256)),
-        # AdvancedSkinProcessing(size=(256, 256)), # NOTE - USED FOR ONLINE PREPROCESSING (IF PREPROCESSING IS DONE OFFLINE, COMMENT THIS OUT)
         transforms.CenterCrop(args.input_size),
         transforms.ToTensor()
     ]
-    # --- END ADD ---
 
     data_transforms = {
         'train': transforms.Compose(train_trans),
         'val': transforms.Compose(val_trans),
-        # 'test': transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # uncomment it when you are testing on F17K or Daffodil
-        # 'test': transforms.Compose([transforms.ToTensor()]) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
-        'test': transforms.Compose(test_trans_tta) if args.TTA else transforms.Compose(val_trans) # For HAM TTA
+        'test': transforms.Compose(test_trans_tta) if args.TTA else transforms.Compose(val_trans) 
     }
 
     if args.nb_classes == 2:
@@ -480,51 +450,31 @@ def main(args, ds_init):
                               binary=binary,
                               image_key=args.image_key)
 
-    # dataset_test = dataset_val 
     dataset_test = Uni_Dataset(df=df,
-                root=args.root_path,
-                test=True,
-                transforms=data_transforms['test'],
-                binary=binary,
-                image_key=args.image_key)
+                               root=args.root_path,
+                               test=True,
+                               transforms=data_transforms['test'],
+                               binary=binary,
+                               image_key=args.image_key)
 
     global_rank = utils.get_rank()
     if args.weights:
         if args.stratify_source:
             print(">>> Using Source-Stratified Sampling (4 Groups: ISIC/Ext * Benign/Mal) <<<")
-            
-            # 1. Get the training dataframe
-            # We assume dataset_train corresponds to df[df['split'] == 'train']
             train_df = df[df['split'] == 'train'].copy()
-            
-            # 2. Identify Source (ISIC vs External)
-            # Logic: ISIC images start with 'ISIC_2024', everything else is External
             train_df['is_isic'] = train_df['image'].astype(str).str.startswith('ISIC_2024')
-            
-            # 3. Identify Label
             label_col = "binary_label" if binary else "label"
             
-            # 4. Create 4 Distinct Groups
-            # Group 0: External Benign
-            # Group 1: External Malignant
-            # Group 2: ISIC Benign
-            # Group 3: ISIC Malignant
-            train_df['group'] = 0 # Default (External Benign)
+            train_df['group'] = 0 
             train_df.loc[ (~train_df['is_isic']) & (train_df[label_col] == 1), 'group'] = 1
             train_df.loc[ (train_df['is_isic']) & (train_df[label_col] == 0), 'group'] = 2
             train_df.loc[ (train_df['is_isic']) & (train_df[label_col] == 1), 'group'] = 3
             
-            # 5. Calculate Weights so each GROUP has equal probability
-            # (i.e., each of the 4 groups contributes 25% of the batch)
             group_counts = train_df['group'].value_counts().sort_index()
             print("Stratified Group Counts:", group_counts.to_dict())
             
-            # Weight = 1 / count
             group_weights = 1.0 / group_counts
-            
-            # Map group weights back to each sample
             sample_weights = torch.tensor(train_df['group'].map(group_weights).values, dtype=torch.double)
-            
             sampler_train = WeightedRandomSampler(weights=sample_weights, num_samples=len(dataset_train), replacement=True)
         else:
             label_counts = dataset_train.count_label("binary_label" if binary else "label")
@@ -542,7 +492,6 @@ def main(args, ds_init):
         print("Using WeightedRandomSampler")
     else:
         num_tasks = utils.get_world_size()
-
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
@@ -558,7 +507,7 @@ def main(args, ds_init):
         sampler_val = torch.utils.data.DistributedSampler(
             dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False)
         sampler_test = torch.utils.data.DistributedSampler(
-            dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=True)
+            dataset_test, num_replicas=num_tasks, rank=global_rank, shuffle=False)
     else:
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
         sampler_test = torch.utils.data.SequentialSampler(dataset_test)
@@ -568,7 +517,6 @@ def main(args, ds_init):
         log_writer = utils.TensorboardLogger(log_dir=args.log_dir)
     else:
         log_writer = None
-
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -588,6 +536,7 @@ def main(args, ds_init):
         )
     else:
         data_loader_val = None
+        
     data_loader_test = torch.utils.data.DataLoader(
         dataset_test, sampler=sampler_test,
         batch_size=args.batch_size if not args.val_batch_size else args.val_batch_size,
@@ -595,6 +544,7 @@ def main(args, ds_init):
         pin_memory=args.pin_mem,
         drop_last=False
     )
+    
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     if mixup_active:
@@ -603,6 +553,7 @@ def main(args, ds_init):
             mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
             prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
+            
     if args.model=="PanDerm_Large_FT":
         model = panderm_large_patch16_224_finetune(
             pretrained=False,
@@ -622,15 +573,11 @@ def main(args, ds_init):
         print(f"Creating SkinEHDLF_Hybrid model with {args.nb_classes} classes...")
         model = skin_ehdlf_hybrid(
             num_classes=args.nb_classes,
-            pretrained=True,  # Assuming you want pretrained backbones
+            pretrained=True, 
             drop_rate=args.drop,
         )
         print(model)
-        # SkinEHDLF is a hybrid (ConvNext/EffNet/Swin) and does not have a single 'patch_embed'.
-        # We set a dummy patch_size to prevent the script from crashing in the next lines.
         patch_size = (16, 16)
-
-
     elif args.model=='PanDerm_Base_FT':
         model = panderm_base_patch16_224_finetune(
             pretrained=False,
@@ -648,33 +595,17 @@ def main(args, ds_init):
         patch_size = model.patch_embed.patch_size
     else:
         raise ValueError(f"Invalid model name '{args.model}', not supported.")
+        
     print("Patch size = %s" % str(patch_size))
     args.window_size = (args.input_size // patch_size[0], args.input_size // patch_size[1])
     args.patch_size = patch_size
 
-
-    # if args.pretrained_checkpoint:
-    #     if args.pretrained_checkpoint.startswith('https'):
-    #         checkpoint = torch.hub.load_state_dict_from_url(
-    #             args.pretrained_checkpoint, map_location='cpu', check_hash=True)
-    #     else:
-    #         checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu')
-    #
-    #         if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
-    #             state_dict = checkpoint['state_dict']
-    #             state_dict = {k:v for k,v in state_dict.items() if 'visual' in k}
-    #             checkpoint = {}
-    #             checkpoint['model'] = {k.replace('module.visual.', 'encoder.'): v for k,v in state_dict.items()}
-    #
-    #     print("Load ckpt from %s" % args.pretrained_checkpoint)
     if args.pretrained_checkpoint:
         if args.pretrained_checkpoint.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.pretrained_checkpoint, map_location='cpu', check_hash=True)
         elif args.is_skinehdlf:
-            # FIX: Load directly into 'checkpoint' so the extraction loop below can find 'model' inside it.
             checkpoint = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) 
-
             checkpoint_model = checkpoint
             
             if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
@@ -683,7 +614,7 @@ def main(args, ds_init):
                 checkpoint = {}
                 checkpoint['model'] = {k.replace('module.visual.', 'encoder.'): v for k, v in state_dict.items()}
         else:
-            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) # Weights_only changed to fix unpickling error
+            checkpoint_model = torch.load(args.pretrained_checkpoint, map_location='cpu', weights_only=False) 
             checkpoint = {'model': checkpoint_model}
             if args.pretrained_checkpoint.split('/')[-1].startswith('open_clip'):
                 state_dict = checkpoint['state_dict']
@@ -708,8 +639,6 @@ def main(args, ds_init):
 
         if not args.is_skinehdlf:
             all_keys = list(checkpoint_model.keys())
-            # print("##########origin keys:", len(all_keys), all_keys)
-            # NOTE: remove all decoder keys
             all_keys = [key for key in all_keys if key.startswith('encoder.')]
             print("all keys:", all_keys)
             for key in all_keys:
@@ -723,7 +652,6 @@ def main(args, ds_init):
                 if key.startswith('teacher.'):
                     checkpoint_model.pop(key)
 
-            # NOTE: replace norm with fc_norm
             for key in list(checkpoint_model.keys()):
                 if key.startswith('norm.'):
                     new_key = key.replace('norm.','fc_norm.')
@@ -735,24 +663,19 @@ def main(args, ds_init):
                     print(f"Removing key {k} from pretrained checkpoint")
                     del checkpoint_model[k]
         else:
-            # --- FIX: ROBUST KEY REMAPPING ---
             print(">>> STARTING CHECKPOINT KEY REMAPPING <<<")
             new_ckpt_model = {}
             for k, v in checkpoint_model.items():
                 new_k = k
-                # 1. Strip 'module.' prefix (from DDP)
                 if new_k.startswith('module.'):
                     new_k = new_k[7:]
                 
-                # 2. Strip 'encoder.' prefix (if present from previous save logic)
                 if new_k.startswith('encoder.'):
                     new_k = new_k.replace('encoder.', '')
                 
-                # 3. Norm replacement (legacy support)
                 if new_k.startswith('norm.'):
                     new_k = new_k.replace('norm.', 'fc_norm.')
                     
-                # 4. Filter decoder/teacher keys
                 if new_k.startswith('decoder.') or new_k.startswith('teacher.'):
                     continue
                     
@@ -760,7 +683,6 @@ def main(args, ds_init):
                 
             checkpoint_model = new_ckpt_model
             
-            # --- DEBUG: Print matched/unmatched keys ---
             model_keys = set(state_dict.keys())
             ckpt_keys = set(checkpoint_model.keys())
             
@@ -775,9 +697,6 @@ def main(args, ds_init):
             if len(missing_keys) > 0:
                 print(f"Sample Missing: {list(missing_keys)[:5]}")
                 
-            # Verify Classifier Head Load
-            # We specifically check for the final layer weights of SkinEHDLF
-            # head_key = 'classifier.3.weight'
             head_key = 'final_fc.weight'
             if head_key in matched_keys:
                 print("✅ CLASSIFIER HEAD FOUND IN CHECKPOINT! Transfer Learning should work.")
@@ -785,7 +704,6 @@ def main(args, ds_init):
                 print("❌ WARNING: CLASSIFIER HEAD NOT FOUND! Head will be random.")
                 if head_key in unexpected_keys:
                     print(f"   (It was found in unexpected keys, likely a naming mismatch)")
-            # ------------------------------------------------
 
         if model.use_rel_pos_bias and "rel_pos_bias.relative_position_bias_table" in checkpoint_model:
             print("Expand the shared relative position embedding to each transformer block. ")
@@ -807,15 +725,10 @@ def main(args, ds_init):
                 src_num_pos, num_attn_heads = rel_pos_bias.size()
                 dst_num_pos, _ = model.state_dict()[key].size()
 
-                # FIX: Only attempt interpolation if sizes differ.
-                # This prevents accessing 'model.patch_embed' on SkinEHDLF when not needed.
                 if src_num_pos != dst_num_pos:
-                    # If we are here with SkinEHDLF, we need to find the correct patch_embed
-                    # or skip if it's too complex. For now, assume standard model structure if resizing.
                     if hasattr(model, 'patch_embed'):
                         dst_patch_shape = model.patch_embed.patch_shape
                     else:
-                        # Try to find it in the swin submodule if it exists (common for hybrids)
                         if hasattr(model, 'swin') and hasattr(model.swin, 'patch_embed'):
                              dst_patch_shape = model.swin.patch_embed.patch_shape
                         else:
@@ -879,13 +792,10 @@ def main(args, ds_init):
 
         print("##############new keys:", len(checkpoint_model), checkpoint_model.keys())
 
-        # TODO interpolate position embedding if need
-
         utils.load_state_dict(model, checkpoint_model, prefix=args.model_prefix)
 
     model.to(device)
 
-    # --- FIX: EXPLICITLY FREEZE BACKBONE FOR LINEAR PROBE ---
     if args.freeze_backbone:
         print("Info: Enabling Linear Eval. Freezing backbone weights...")
         for name, param in model.named_parameters():
@@ -893,11 +803,9 @@ def main(args, ds_init):
                 param.requires_grad = False
             else:
                 print(f"Keeping {name} unfrozen.")
-    # --------------------------------------------------------
 
     model_ema = None
     if args.model_ema:
-        # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
         model_ema = ModelEma(
             model,
             decay=args.model_ema_decay,
@@ -923,10 +831,6 @@ def main(args, ds_init):
     num_layers = model_without_ddp.get_num_layers()
     if args.layer_decay < 1.0:
         if args.is_skinehdlf:
-            # Special handling for SkinEHDLF hybrid model
-            # We enforce a fake depth of 7 to get roughly 0.1x decay at the bottom (0.75^8 ~= 0.1)
-            # Layer 0: Backbone (0.1x LR)
-            # Layer Max: Head (1.0x LR)
             fake_num_layers = 7
             assigner = SkinEHDLFLayerDecayValueAssigner(
                 list(args.layer_decay ** (fake_num_layers + 1 - i) for i in range(fake_num_layers + 2))
@@ -964,7 +868,6 @@ def main(args, ds_init):
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
             model_without_ddp = model.module
         
-        # --- MODIFICATION: Optimizer and Loss Scaler are only created if NOT in --eval mode ---
         if not args.eval:
             optimizer = create_optimizer(
                 args, model_without_ddp, skip_list=skip_weight_decay_list,
@@ -975,7 +878,23 @@ def main(args, ds_init):
             optimizer = None
             loss_scaler = None
     
-    # --- This block only runs if we are in TRAINING mode ---
+    # Define standard checkpoint suffix mapping logic before evaluating mode branches
+    checkpoint_suffix_best = "best"
+    checkpoint_suffix_last = "last"
+    if args.is_linear_probe:
+        checkpoint_suffix_best = "best-lp"
+        checkpoint_suffix_last = "last-lp"
+    elif args.is_stage_1_ft:
+        checkpoint_suffix_best = "best-stage-1"
+        checkpoint_suffix_last = "last-stage-1"
+    elif args.is_domain_shift:
+        checkpoint_suffix_best = "best-domain-shift"
+        checkpoint_suffix_last = "last-domain-shift"
+
+    if args.is_experiment:
+        checkpoint_suffix_best = checkpoint_suffix_best + '-experiment'
+        checkpoint_suffix_last = checkpoint_suffix_last + '-experiment'
+
     if not args.eval:
         print("Use step level LR scheduler!")
 
@@ -989,30 +908,20 @@ def main(args, ds_init):
                 args.weight_decay, args.weight_decay_end, args.epochs, num_training_steps_per_epoch)
             print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
-        # MODIFICATION: Calculate class weights and apply them to the loss function
         label_counts = dataset_train.count_label("binary_label" if binary else "label")
         total_samples = sum(label_counts)
-
-        # Applies a weight cap to avoid extremely high weights, which could destabilize training
         weight_cap = args.weight_cap 
 
-        # --- FIX: Match SkinEHDLF "Cross-Weighted Loss" + Sigmoid ---
         if args.is_skinehdlf and args.nb_classes == 2 and not args.focal_loss:
-            # For Binary (Sigmoid), "Cross-Weighted" means weighting the Positive class 
-            # to balance the loss contribution.
-            # Formula: pos_weight = Number_Negative / Number_Positive
-            
             pos_weight_tensor = None
-            if not args.no_class_weights: # Only calculate pos_weight if class weights are enabled
+            if not args.no_class_weights: 
                 if args.custom_majority_alpha and args.custom_minority_alpha:
-                    # NOTE - Indicating custom_minority_ or _majority_alpha means "I want to set a specific pos_weight ratio instead of calculating it from the data" in the sigmoid function case. Names are consistent with the softmax function case for backwards compatibility
                     pos_weight_val = args.custom_minority_alpha / args.custom_majority_alpha
                 else:
                     n_neg = label_counts[0]
                     n_pos = label_counts[1]
                     pos_weight_val = n_neg / n_pos
                 
-                # Cap the weight if needed (to prevent instability if imbalance is extreme)
                 if args.weight_cap is not None:
                     pos_weight_val = min(pos_weight_val, args.weight_cap)
                     
@@ -1023,26 +932,15 @@ def main(args, ds_init):
             else:
                 print(f">>> Using Binary Cross-Weighted Loss (Sigmoid). Pos Weight: None")
 
-            
-            # BCEWithLogitsLoss combines Sigmoid + Weighted BCELoss
-            # Note: This expects targets to be float, which we handle in the training loop
             criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
             
         else:
-            # Multi-class Fallback (Softmax + Class Weights) [or PanDerm]
             class_weights_list = [min((total_samples / (len(label_counts) * count)), weight_cap) for count in label_counts] if not args.sq_root_loss else [min((total_samples / (len(label_counts) * count))**0.5, weight_cap) for count in label_counts]
-
-            # --- FIX: Use square root of inverse frequency to soften extreme weights ---
-            # class_weights_list = [(total_samples / (len(label_counts) * count))**0.5 for count in label_counts]
-
             class_weights = torch.tensor(class_weights_list if (not args.custom_majority_alpha or not args.custom_minority_alpha) else [args.custom_majority_alpha, args.custom_minority_alpha], device=device)
-            # print("Using Class Weights for Loss:", class_weights)
 
             if mixup_fn is not None:
-                # smoothing is handled with mixup label transform
                 if not args.no_class_weights:
                     print("Using Weighted Cross Entropy for Mixup with weights:", class_weights)
-                    # PyTorch CrossEntropyLoss handles Soft Targets (N, C) automatically
                     criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
                 else:
                     criterion = SoftTargetCrossEntropy()
@@ -1053,10 +951,8 @@ def main(args, ds_init):
                     print("Using Focal Loss with Class Weights:", class_weights)
                 criterion = FocalLoss(gamma=args.focal_loss_gamma, alpha=class_weights if not args.no_class_weights else None, reduction='mean')
             else:
-                # Apply the calculated class weights here
                 if not args.no_class_weights:
                     print("Using Class Weights for Loss:", class_weights)
-                # NOTE - This might be the best way to address imbalanced datasets
                 criterion = torch.nn.CrossEntropyLoss(weight=class_weights if not args.no_class_weights else None)
 
         print("criterion = %s" % str(criterion))
@@ -1065,15 +961,10 @@ def main(args, ds_init):
             args=args, model=model, model_without_ddp=model_without_ddp,
             optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
 
-    # --- +++ CORRECTED AND UNIFIED args.eval BLOCK +++ ---
     elif args.eval:
         epoch=0
         model_weight = args.resume
         model_dict = torch.load(model_weight, map_location=device, weights_only=False)
-        
-        # --- FIX: REMAP KEYS FOR LEGACY CHECKPOINTS (Evaluation Mode) ---
-        # The user is loading a checkpoint trained with "classifier.*" (old head)
-        # into a model expecting "features_head.*" and "final_fc.*" (new split head).
         
         state_dict = model_dict['model']
         new_state_dict = {}
@@ -1082,15 +973,11 @@ def main(args, ds_init):
         remapped_count = 0
         for k, v in state_dict.items():
             if k.startswith('classifier.'):
-                # We found legacy keys! Remap them.
                 parts = k.split('.')
-                # Structure: classifier.{layer_idx}.{weight/bias}
                 if len(parts) >= 3:
                     layer_idx = int(parts[1])
                     suffix = parts[2]
                     
-                    # Logic: The last layer (15) is the final linear layer -> final_fc
-                    # All previous layers (0, 3, 6, 9, 12) -> features_head
                     if layer_idx == 15:
                         new_key = f"final_fc.{suffix}"
                     else:
@@ -1099,7 +986,6 @@ def main(args, ds_init):
                     new_state_dict[new_key] = v
                     remapped_count += 1
                 else:
-                    # Fallback if structure is weird
                     new_state_dict[k] = v
             else:
                 new_state_dict[k] = v
@@ -1107,41 +993,24 @@ def main(args, ds_init):
         if remapped_count > 0:
             print(f">>> Successfully remapped {remapped_count} keys from 'classifier' to 'features_head/final_fc'.")
         
-        # Load the (potentially modified) state dict
         model.load_state_dict(new_state_dict)
-        # ----------------------------------------------------------------
         
-        best_threshold = args.eval_threshold  # Default threshold if not tuning
+        best_threshold = args.eval_threshold  
         if args.tune_threshold:
             print("\n--- EVALUATION-ONLY MODE WITH THRESHOLD TUNING ---")
-            
-            # --- (UNIFIED) STEP 1: Get probabilities from VAL set to find threshold ---
             print("Running on validation set to find best threshold (using standard eval)...")
-            # We *always* use the standard (non-TTA) validation loader to find the threshold.
-            # The 'evaluate' function now returns metrics, wandb_res, prediction_array, true_label_decode_array
             _, _, val_probs, val_labels = evaluate(
                 data_loader_val, model, device, args.output_dir, epoch, 
                 mode='val_tune', num_class=args.nb_classes, decision_threshold=None, is_skinehdlf=args.is_skinehdlf
             )
 
-            # --- (UNIFIED) STEP 2: Calculate best threshold (Targeting a Specific Recall) ---
-            TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+            TARGET_RECALL = 0.90  
             print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
             
-            # Handle binary case specifically for threshold finding
-            # if args.nb_classes == 2:
             val_probs_positive = val_probs[:, 1]
-            # else:
-            #     # Fallback for multi-class (conceptually trickier, assumes class 1 is positive)
-            #     val_probs_positive = val_probs[:, 1]
-
             precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
 
             try:
-                # Find the last index where recall is >= your target
-                # (The arrays are sorted by recall, descending, so [0] is highest recall)
-                # We find the *last* index ([0][-1]) which has the highest precision 
-                # *while still meeting* our recall target.
                 target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
                 best_threshold = thresholds[target_recall_index]
                 
@@ -1150,15 +1019,12 @@ def main(args, ds_init):
                 print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
 
             except IndexError:
-                # Fallback if target recall is never achieved
                 print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
                 f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
                 best_threshold = thresholds[np.argmax(f1_scores)]
 
             print(f"Using threshold: {best_threshold:.4f}")
             
-            # --- +++ ADDED THIS MEMORY CLEANUP +++ ---
-            # --- This is the key fix for the args.eval path ---
             print("Clearing validation probability arrays...")
             try:
                 del val_probs
@@ -1169,16 +1035,14 @@ def main(args, ds_init):
             except Exception as e:
                 print(f"Could not delete val arrays: {e}")
                 
-            torch.cuda.empty_cache() # Clear cache before final test run
-            # --- +++ END MEMORY CLEANUP +++ ---
+            torch.cuda.empty_cache() 
 
-        # --- (UNIFIED) STEP 3: Run on TEST set using the tuned threshold ---
         if args.TTA:
             print(f"Starting TEST evaluation with TTA (using threshold={best_threshold:.4f})")
             test_stats, _, _, _ = evaluate_tta(
                 data_loader_test, model, device, args.output_dir, epoch,
                 mode='test', num_class=args.nb_classes,
-                decision_threshold=best_threshold, # <-- Pass tuned threshold
+                decision_threshold=best_threshold, 
                 is_skinehdlf=args.is_skinehdlf
             )
         else:
@@ -1186,7 +1050,7 @@ def main(args, ds_init):
             test_stats, wandb_test, _, _ = evaluate(
                 data_loader_test, model, device, args.output_dir, epoch, 
                 mode='test', num_class=args.nb_classes,
-                decision_threshold=best_threshold, # <-- Pass tuned threshold
+                decision_threshold=best_threshold, 
                 is_skinehdlf=args.is_skinehdlf
             )
             print("Logging final test metrics (with tuned threshold) to wandb...")
@@ -1194,23 +1058,22 @@ def main(args, ds_init):
         
         print("Final Tuned Test Metrics:", test_stats)
         exit(0)
-    # --- +++ END CORRECTED BLOCK +++ ---
     
     else:
-        # This else should not be reachable if logic is correct
         print("Error: --eval flag was not processed correctly.")
         exit(1)
 
-    # --- This block only runs if we are in TRAINING mode ---
+    # --- TRAINING LOOP START ---
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
     max_auc = 0.0
     max_performance = 0.0
+    
+    # Initialize early stopping patience tracker
+    patience_counter = 0
+
     for epoch in range(args.start_epoch, args.epochs):
-        # The .set_epoch() method is specific to the DistributedSampler and is needed
-        # to ensure proper shuffling in a multi-GPU environment. The WeightedRandomSampler
-        # does not have this method. This check prevents an AttributeError.
         if args.distributed and isinstance(data_loader_train.sampler, torch.utils.data.DistributedSampler):
             data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
@@ -1224,10 +1087,10 @@ def main(args, ds_init):
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
             args=args
         )
-        # Note: evaluate() now returns: metrics, wandb_res, prediction_array, true_label_decode_array
+        
         val_stats, wandb_res, _, _ = evaluate(
             data_loader_val, model, device, args.output_dir, epoch, mode='val',
-            num_class=args.nb_classes, decision_threshold=None, # Use default threshold for epoch-to-epoch saving
+            num_class=args.nb_classes, decision_threshold=None, 
             is_skinehdlf=args.is_skinehdlf
         )
         print('--------------------------',wandb_res)
@@ -1235,63 +1098,61 @@ def main(args, ds_init):
             wandb_res['Val W_F1'], wandb_res['Val Recall_macro']
         wandb.log(wandb_res)
 
-        checkpoint_suffix_best = "best"
-        checkpoint_suffix_last = "last"
-        if args.is_linear_probe:
-            checkpoint_suffix_best = "best-lp"
-            checkpoint_suffix_last = "last-lp"
-        elif args.is_stage_1_ft:
-            checkpoint_suffix_best = "best-stage-1"
-            checkpoint_suffix_last = "last-stage-1"
-        elif args.is_domain_shift:
-            checkpoint_suffix_best = "best-domain-shift"
-            checkpoint_suffix_last = "last-domain-shift"
-
-        if args.is_experiment:
-            checkpoint_suffix_best = checkpoint_suffix_best + '-experiment'
-            checkpoint_suffix_last = checkpoint_suffix_last + '-experiment'
-
+        # Monitor targeted metric and update the patience counter bounds
         if args.nb_classes == 2:
             if max_performance < val_auc_roc:
                 max_performance = val_auc_roc
+                patience_counter = 0  # Reset counter on metric improvement
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
-            print(f'Max AUCROC: {max_performance:.2f}%')
+            else:
+                patience_counter += 1  # Increment counter on metric stagnation
+            print(f'Max AUCROC: {max_performance:.2f}% (Patience: {patience_counter}/{args.patience if args.patience > 0 else "∞"})')
+            
         elif args.monitor == 'acc':
-
             if max_performance < val_acc:
                 max_performance = val_acc
+                patience_counter = 0  
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
-            print(f'Max val mean accuracy: {max_performance:.2f}%') 
+            else:
+                patience_counter += 1  
+            print(f'Max val mean accuracy: {max_performance:.2f}% (Patience: {patience_counter}/{args.patience if args.patience > 0 else "∞"})') 
 
         elif args.monitor == 'recall':
             if max_performance < val_mean_recall:
                 max_performance = val_mean_recall
+                patience_counter = 0  
                 if args.output_dir:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                         loss_scaler=loss_scaler, epoch=checkpoint_suffix_best, model_ema=model_ema)
-            print(f'Max val mean recall: {max_performance:.2f}%')
+            else:
+                patience_counter += 1  
+            print(f'Max val mean recall: {max_performance:.2f}% (Patience: {patience_counter}/{args.patience if args.patience > 0 else "∞"})')
 
-        # --- +++ ADD THIS BLOCK +++ ---
         # Always save the latest epoch as 'checkpoint-last.pth'
         if args.output_dir:
             utils.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=checkpoint_suffix_last, model_ema=model_ema)
-        # --- +++ END BLOCK +++ ---
 
-        # --- +++ MODIFIED FINAL EVALUATION BLOCK (WITH MEMORY CLEANUP) +++ ---
-        if epoch == (args.epochs - 1):
-            print("\n--- FINAL EVALUATION ---")
+        # Check early stopping status
+        early_stop_triggered = args.patience > 0 and patience_counter >= args.patience
+
+        # --- UNIFIED FINAL TEST-SET EVALUATION BLOCK ---
+        if epoch == (args.epochs - 1) or early_stop_triggered:
+            if early_stop_triggered:
+                print(f"\n🛑 Early stopping triggered! Performance did not improve for {args.patience} consecutive epochs.")
+                print(f"Halting training loop at epoch {epoch}. Executing final test-set evaluation...")
+            else:
+                print("\n--- FINAL EVALUATION (Max Scheduled Epochs Reached) ---")
             
             # --- STEP 1: Free all unnecessary training memory ---
-            # The optimizer and loss_scaler are the biggest memory hogs
             print("Clearing training tensors (optimizer, loss_scaler) from GPU memory...")
             try:
                 del optimizer
@@ -1299,15 +1160,14 @@ def main(args, ds_init):
             except Exception as e:
                 print(f"Could not delete optimizer/loss_scaler: {e}")
 
-            # Clear the CUDA cache to free up fragmented memory
             torch.cuda.empty_cache()
 
-            print("Loading best checkpoint (checkpoint-best.pth)...")
-            model_weight = args.output_dir + '/' + 'checkpoint-best.pth'
+            print(f"Loading best checkpoint (checkpoint-{checkpoint_suffix_best}.pth)...")
+            model_weight = os.path.join(args.output_dir, f'checkpoint-{checkpoint_suffix_best}.pth')
             model_dict = torch.load(model_weight, map_location=device, weights_only=False)
             model.load_state_dict(model_dict['model'])
 
-            best_threshold = 0.5  # Default threshold if not tuning
+            best_threshold = 0.5  
             if args.tune_threshold:
                 # --- STEP 2: Get probabilities from VAL set to find threshold ---
                 print("Running on validation set to find best threshold...")
@@ -1317,19 +1177,13 @@ def main(args, ds_init):
                 )
 
                 # --- STEP 3: Calculate best threshold (Targeting a Specific Recall) ---
-                TARGET_RECALL = 0.90  # <<< SET YOUR GOAL: e.g., 90% or 95% sensitivity
+                TARGET_RECALL = 0.90  
                 print(f"Finding threshold for at least {TARGET_RECALL*100}% recall...")
                 
-                # Handle binary case
-                # if args.nb_classes == 2:
                 val_probs_positive = val_probs[:, 1]
-                # else:
-                #     val_probs_positive = val_probs[:, 1]
-                    
                 precisions, recalls, thresholds = precision_recall_curve(val_labels, val_probs_positive)
 
                 try:
-                    # Find the last index where recall is >= your target
                     target_recall_index = np.where(recalls >= TARGET_RECALL)[0][-1]
                     best_threshold = thresholds[target_recall_index]
                     
@@ -1338,7 +1192,6 @@ def main(args, ds_init):
                     print(f"  > Recall at this threshold: {recalls[target_recall_index]:.4f}")
 
                 except IndexError:
-                    # Fallback if target recall is never achieved
                     print(f"Could not achieve {TARGET_RECALL*100}% recall. Defaulting to max F1.")
                     f1_scores = (2 * precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1] + 1e-9)
                     best_threshold = thresholds[np.argmax(f1_scores)]
@@ -1356,7 +1209,7 @@ def main(args, ds_init):
                 except Exception as e:
                     print(f"Could not delete val arrays: {e}")
                 
-                torch.cuda.empty_cache() # Clear cache again before final test run
+                torch.cuda.empty_cache() 
 
             # --- STEP 5: Run on TEST set using the tuned threshold ---
             if args.TTA or args.test_tta:
@@ -1364,22 +1217,23 @@ def main(args, ds_init):
                 test_stats, _, _, _ = evaluate_tta(
                     data_loader_test, model, device, args.output_dir, epoch,
                     mode='test', num_class=args.nb_classes,
-                    decision_threshold=best_threshold, # <-- Pass tuned threshold
-                    is_skinehdlf=args.is_skinehdlf
+                    decision_threshold=best_threshold, is_skinehdlf=args.is_skinehdlf
                 )
             else:
                 print(f"Starting test without TTA (using threshold={best_threshold:.4f})")
                 test_stats, wandb_test, _, _ = evaluate(
                     data_loader_test, model, device, args.output_dir, epoch, 
                     mode='test', num_class=args.nb_classes,
-                    decision_threshold=best_threshold, # <-- Pass tuned threshold
-                    is_skinehdlf=args.is_skinehdlf
+                    decision_threshold=best_threshold, is_skinehdlf=args.is_skinehdlf
                 )
                 print("Logging final test metrics (with tuned threshold) to wandb...")
                 wandb.log(wandb_test)
             
             print("Final Tuned Test Metrics:", test_stats)
-        # --- +++ END MODIFIED BLOCK +++ ---
+            
+            # Escape the epoch loop if early stopping triggered
+            if early_stop_triggered:
+                break
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -1387,7 +1241,6 @@ def main(args, ds_init):
 
 
 if __name__ == '__main__':
-    # This will load the WANDB_API_KEY from your .env file into the environment
     load_dotenv()
 
     print("Getting args", flush=True)
@@ -1398,7 +1251,7 @@ if __name__ == '__main__':
     wandb.init(
         project=project_name,
         name=opts.wandb_name,
-        notes="baselines", \
+        notes="baselines", 
         config=opts)
     if opts.output_dir:
         Path(opts.output_dir).mkdir(parents=True, exist_ok=True)

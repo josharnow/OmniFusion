@@ -151,7 +151,7 @@ ${PYTHON} run_class_finetuning.py \
     --resume "${FOLD_OUTPUT_DIR}/checkpoint-best-domain-shift.pth" \
     --TTA \
     --eval_threshold 0.5 \
-    --eval # This flag forces evaluation ONLY
+    --eval
     # --custom_majority_alpha 1.0 \
     # --custom_minority_alpha 5.0
     # --focal_loss \
