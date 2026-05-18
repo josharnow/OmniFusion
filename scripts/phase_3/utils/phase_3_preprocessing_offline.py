@@ -58,10 +58,7 @@ def process_single_file(file_path):
         filename = os.path.basename(file_path)
         save_path = os.path.join(DEST_DIR, filename)
 
-        # --- RESUME LOGIC: Skip if exists ---
-        if os.path.exists(save_path):
-            return None # Skip silently
-
+        # --- MODIFICATION: Removed the check that skips existing files ---
         # Initialize processor locally
         processor = AdvancedSkinProcessing()
         
@@ -73,7 +70,7 @@ def process_single_file(file_path):
         # Process
         processed_img = processor.process(img)
         
-        # Save
+        # Save (will automatically overwrite if the file exists)
         cv2.imwrite(save_path, processed_img)
         return None 
         
@@ -85,7 +82,7 @@ def main():
         print(f"Creating directory: {DEST_DIR}")
         os.makedirs(DEST_DIR, exist_ok=True)
     
-    # --- FIX: Case-Insensitive Image Collection ---
+    # --- Case-Insensitive Image Collection ---
     print(f"Scanning {SOURCE_DIR}...")
     image_paths = []
     
