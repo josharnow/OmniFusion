@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=PanDerm
-#SBATCH --output=../../logs/phase_3/finetune_job_%A_%a.out
-#SBATCH --error=../../logs/phase_3/finetune_job_%A_%a.err
+#SBATCH --job-name=PDeval
+#SBATCH --output=../../logs/phase_3/evaluate_job_%A_%a.out
+#SBATCH --error=../../logs/phase_3/evaluate_job_%A_%a.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -9,6 +9,7 @@
 
 # --- Set the number of splits for your array ---
 #SBATCH --array=1-10%3  # Creates 10 jobs, with task IDs from 1 to 10; matches n_splits in Makefile. % limits to 3 concurrent jobs
+
 
 
 # --- Your Project Variables ---
@@ -29,40 +30,33 @@ NUM_WORKERS=8
 # This assumes your k-fold CSVs are named like fold_1/fold_data.csv, fold_2/fold_data.csv, etc.
 # This path construction is crucial for the job array to work correctly.
 FOLD_OUTPUT_DIR="${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}"
-# FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_external.csv"
 FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_ghahari.csv"
+# FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_target.csv"
 
 # --- Hyperparameters from README.md ---
 # Note: Batch size and LR are adjusted for a single GPU setup
 # BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-BATCH_SIZE=8             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
-# BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+BATCH_SIZE=384             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
-# LEARNING_RATE=2e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=1e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# LEARNING_RATE=5e-4       
-LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
-# WARMUP_EPOCHS=1           #
-WARMUP_EPOCHS=15           #
-EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
+# LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=1e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=5e-6        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+# LEARNING_RATE=5e-4       
+# LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+WARMUP_EPOCHS=1           #
 # WARMUP_EPOCHS=5           #
-# EPOCHS=40                 # Start with 10 epochs and increase if needed (README uses 50)
-LAYER_DECAY=0.75          # Moderate layer decay to prevent large updates to pretrained weights in early layers while allowing some fine-tuning
-# LAYER_DECAY=1.00         
-DROP_PATH=0.2             #
+EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
+LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
+DROP_PATH=0.4             #
 # DROP_PATH=0.3             #
-# WEIGHT_DECAY=0.0         #
-WEIGHT_DECAY=0.05         #
-# WEIGHT_DECAY=0.2         #
+# WEIGHT_DECAY=0.05         #
+WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 CUTMIX=0.0                #
 MIXUP=0.0                 #
-# MIXUP=0.5                 #
 # MIXUP=0.8                 #
 # CUTMIX=1.0                # *** NOTE - THIS COULD HARM PERFORMANCE IF THE DATA IS MULTIMODAL; IT CAN CAUSE THE MODEL TO LEARN SPOOFED FEATURES (ARTIFACTS) FROM MIXED SAMPLES ***
 # MIXUP=0.8                 #
@@ -71,9 +65,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
-
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting
 
 # --- Change to the project root directory ---
 cd ../..
@@ -92,7 +84,7 @@ export LD_LIBRARY_PATH="/home/PACE/ja50529n/MS Thesis/Model/PanDerm/venv/lib/pyt
 
 
 echo "Visible CUDA device environment variables: $CUDA_VISIBLE_DEVICES"
-echo "Starting fine-tuning job for Fold 1 on $(hostname)"
+echo "Starting fine-tuning job for Fold ${SLURM_ARRAY_TASK_ID} on $(hostname)"
 
 # create virtualenv with...
 if [ ! -d venv ]; then
@@ -125,6 +117,7 @@ ${PYTHON} run_class_finetuning.py \
     --data_path "${FOLD_CSV_PATH}" \
     --batch_size ${BATCH_SIZE} \
     --root_path "${ROOT_PATH}" \
+    --pretrained_checkpoint "${FOLD_OUTPUT_DIR}/checkpoint-best-domain-shift.pth" \
     --output_dir "${FOLD_OUTPUT_DIR}" \
     --log_dir "${FOLD_OUTPUT_DIR}" \
     --nb_classes ${NB_CLASSES} \
@@ -138,10 +131,12 @@ ${PYTHON} run_class_finetuning.py \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
+    --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
-    --wandb_name "EXPERIMENT_Fold_1_Phase3_FT" \
-    --aa "${aa}" \
+    --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_FT" \
+    --aa '' \
+    --stratify_source \
     --mixup ${MIXUP} \
     --cutmix ${CUTMIX} \
     --mixup_prob 1.0 \
@@ -151,21 +146,20 @@ ${PYTHON} run_class_finetuning.py \
     --val_batch_size 12 \
     --test_tta \
     --is_skinehdlf \
-    --opt "adamw" \
     --no_auto_resume \
-    --disable_amp \
-    --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/model_2-best.pth" \
-    --is_domain_shift
+    --no_class_weights \
+    --resume "${FOLD_OUTPUT_DIR}/checkpoint-best-domain-shift.pth" \
+    --TTA \
+    --eval_threshold 0.5 \
+    --eval # This flag forces evaluation ONLY
     # --custom_majority_alpha 1.0 \
-    # --custom_minority_alpha 2.0 \
-    # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
-
-    # --sq_root_loss \
-    # --weights \
+    # --custom_minority_alpha 5.0
+    # --focal_loss \
+    # --focal_loss_gamma 2.0 \
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
 
     # NOTE - weights FLAG ENABLES THE WEIGHTED RANDOM SAMPLER
 
-echo "Finished fine-tuning experiment job for Fold 1"
+echo "Finished evaluation job for Fold ${SLURM_ARRAY_TASK_ID}"
