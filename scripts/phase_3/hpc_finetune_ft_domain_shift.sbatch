@@ -36,7 +36,7 @@ FOLD_CSV_PATH="${CSV_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/fold_data_ghahari.csv
 # Note: Batch size and LR are adjusted for a single GPU setup
 # BATCH_SIZE=24             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
 # BATCH_SIZE=48             # Smaller batch size for fine-tuning (FOR AMP ENABLED)
-BATCH_SIZE=8             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
+BATCH_SIZE=16             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 # BATCH_SIZE=64             # Smaller batch size for fine-tuning (FOR AMP DISABLED)
 UPDATE_FREQ=1        
 # LEARNING_RATE=2e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
@@ -45,7 +45,7 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
-LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
 WARMUP_EPOCHS=15           #
@@ -149,6 +149,7 @@ ${PYTHON} run_class_finetuning.py \
     --mixup_mode "batch" \
     --update_freq ${UPDATE_FREQ} \
     --val_batch_size 12 \
+    --TTA \
     --test_tta \
     --is_skinehdlf \
     --opt "adamw" \
@@ -156,13 +157,13 @@ ${PYTHON} run_class_finetuning.py \
     --disable_amp \
     --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/model_2-best.pth" \
     --is_domain_shift \
-    --patience 15
-    # --custom_majority_alpha 1.0 \
-    # --custom_minority_alpha 2.0 \
+    --patience 50 \
+    --weights \
+    --custom_majority_alpha 1.0 \
+    --custom_minority_alpha 2.0
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
 
     # --sq_root_loss \
-    # --weights \
     # --TTA \
     # --focal_loss \
     # --focal_loss_gamma 4.0 \
