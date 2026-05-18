@@ -648,20 +648,21 @@ def batch_tta_transforms(batch_tensor, num_augmentations=5):
     return torch.stack(augmented_batches, dim=0)
 
 class TTAHandler:
-    def __init__(self, num_augmentations=5):
+    def __init__(self, num_augmentations=5, mean=[0.485, 0.456, 0.406], std=[0.228, 0.224, 0.225]):
         self.num_augmentations = num_augmentations
+        self.mean = mean
+        self.std = std
         self.transforms = self.get_inference_transforms()
 
     def get_inference_transforms(self):
-        # --- FIX: Removed double resizing, aligned with training boundaries ---
         return transforms.Compose([
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             transforms.RandomApply([transforms.RandomRotation(30)], p=0.3),
             transforms.RandomApply([transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)], p=0.3),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=self.mean, std=self.std)
         ])
-
+    
     def apply_transforms(self, batch_tensor):
         device = batch_tensor.device
         augmented_batches = []
@@ -677,7 +678,7 @@ def evaluate_tta(data_loader, model, device, out_dir, epoch, mode, num_class, nu
     model.eval()
     criterion = torch.nn.CrossEntropyLoss()  # Dummy criterion for compatibility
     metric_logger = MetricLogger(delimiter="  ")
-    tta_handler = TTAHandler(num_augmentations=num_TTA)
+    tta_handler = TTAHandler(num_augmentations=num_TTA, mean=[0.485, 0.456, 0.406], std=[0.228, 0.224, 0.225]) # match training configs
     results = []
     all_preds = []
     all_targets = []

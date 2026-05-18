@@ -156,7 +156,7 @@ ${PYTHON} run_class_finetuning.py \
     --disable_amp \
     --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/model_2-best.pth" \
     --is_domain_shift \
-    --patience 10
+    --patience 15
     # --custom_majority_alpha 1.0 \
     # --custom_minority_alpha 2.0 \
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
