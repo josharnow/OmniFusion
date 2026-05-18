@@ -50,10 +50,10 @@ WARMUP_EPOCHS=1           #
 # WARMUP_EPOCHS=5           #
 EPOCHS=20                 # Start with 10 epochs and increase if needed (README uses 50)
 LAYER_DECAY=1.00          # Disabled for SkinEHDLF due to hybrid architecture
-DROP_PATH=0.4             #
+DROP_PATH=0.2             #
 # DROP_PATH=0.3             #
-# WEIGHT_DECAY=0.05         #
-WEIGHT_DECAY=0.1         #
+WEIGHT_DECAY=0.05         #
+# WEIGHT_DECAY=0.1         #
 # NOTE - Disabling mixup and cutmix for now
 CUTMIX=0.0                #
 MIXUP=0.0                 #
@@ -65,7 +65,7 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-DROPOUT_RATE=0.5 # Adding dropout for fine-tuning to reduce overfitting
+DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting
 
 # --- Change to the project root directory ---
 cd ../..
@@ -131,12 +131,10 @@ ${PYTHON} run_class_finetuning.py \
     --smoothing ${SMOOTHING} \
     --reprob ${REPROB} \
     --monitor ${MONITOR} \
-    --weights \
     --drop ${DROPOUT_RATE} \
     --clip_grad 1.0 \
     --wandb_name "Fold_${SLURM_ARRAY_TASK_ID}_Phase3_FT" \
     --aa '' \
-    --stratify_source \
     --mixup ${MIXUP} \
     --cutmix ${CUTMIX} \
     --mixup_prob 1.0 \
@@ -147,7 +145,6 @@ ${PYTHON} run_class_finetuning.py \
     --test_tta \
     --is_skinehdlf \
     --no_auto_resume \
-    --no_class_weights \
     --resume "${FOLD_OUTPUT_DIR}/checkpoint-best-domain-shift.pth" \
     --TTA \
     --eval_threshold 0.5 \
