@@ -46,10 +46,10 @@ UPDATE_FREQ=1
 # LEARNING_RATE=1e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=5e-4       
-LEARNING_RATE=5e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
+LEARNING_RATE=2e-5        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # LEARNING_RATE=1e-4        # A smaller LR is safer for fine-tuning than the 5e-4 in the README
 # WARMUP_EPOCHS=1           #
-WARMUP_EPOCHS=15           #
+WARMUP_EPOCHS=10           #
 EPOCHS=200                 # Start with 10 epochs and increase if needed (README uses 50)
 # WARMUP_EPOCHS=5           #
 # EPOCHS=40                 # Start with 10 epochs and increase if needed (README uses 50)
@@ -58,7 +58,8 @@ LAYER_DECAY=0.75          # Moderate layer decay to prevent large updates to pre
 DROP_PATH=0.2             #
 # DROP_PATH=0.3             #
 # WEIGHT_DECAY=0.0         #
-WEIGHT_DECAY=0.05         #
+WEIGHT_DECAY=0.1         #
+# WEIGHT_DECAY=0.05         #
 # WEIGHT_DECAY=0.2         #
 # NOTE - Disabling mixup and cutmix for now
 CUTMIX=0.0                #
@@ -72,9 +73,10 @@ SMOOTHING=0.0
 REPROB=0.25               #
 MONITOR="recall"     # Metric to monitor for saving best model (ONLY FOR MULTICLASS CLASSIFICATION; otherwise max AUC-ROC is used)
 
-aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
+aa="rand-m9-mstd0.5-inc1" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
+# aa="" # AutoAugment policy (from timm library) - using the same one as the authors for consistency; can experiment with others if desired
 
-DROPOUT_RATE=0.3 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
+DROPOUT_RATE=0.4 # Adding dropout for fine-tuning to reduce overfitting (0.3 is optimal according to SkinEHDLF paper)
 
 # --- Change to the project root directory ---
 cd ../..
@@ -158,10 +160,10 @@ ${PYTHON} run_class_finetuning.py \
     --disable_amp \
     --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_${SLURM_ARRAY_TASK_ID}/model_2-best.pth" \
     --is_domain_shift \
-    --patience 50 \
-    --weights \
-    --custom_majority_alpha 1.0 \
-    --custom_minority_alpha 2.0
+    --patience 30 \
+    --weights
+    # --custom_majority_alpha 1.0 \
+    # --custom_minority_alpha 2.0
     # --pretrained_checkpoint "${OUTPUT_BASE_DIR}/fold_1/checkpoint-best-stage-1.pth" \
 
     # --sq_root_loss \
